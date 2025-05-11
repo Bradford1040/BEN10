@@ -1206,3 +1206,53 @@ Already up to date.
 
 Skipping symbolic link: ben10_data/config/KAMP
 
+Skipping symbolic link: ben10_data/logs/mainsail-access.log
+Skipping symbolic link: ben10_data/logs/mainsail-error.log
+
+basename: missing operand
+Try 'basename --help' for more information.
+
+Aborting commit due to empty commit message.
+
+[devel-ben10 cdd1e68]  - No new changes pushed
+ 9 files changed, 72554 insertions(+)
+ create mode 100644 ben10_data/logs/klippy.log
+ create mode 100644 ben10_data/logs/klippy.log.2025-05-02
+ create mode 100644 ben10_data/logs/klippy.log.2025-05-03
+ create mode 100644 ben10_data/logs/klippy.log.2025-05-04
+ create mode 100644 ben10_data/logs/klippy.log.2025-05-05
+ create mode 100644 ben10_data/logs/klippy.log.2025-05-08
+ create mode 100644 ben10_data/logs/moonraker.log
+ create mode 100644 ben10_data/logs/moonraker.log.2025-05-08
+ create mode 100644 ben10_data/logs/moonraker.log.2025-05-09
+
+remote: error: GH013: Repository rule violations found for refs/heads/devel-ben10.        
+remote: 
+remote: - GITHUB PUSH PROTECTION        
+remote:   —————————————————————————————————————————        
+remote:     Resolve the following violations before pushing again        
+remote: 
+remote:     - Push cannot contain secrets        
+remote: 
+remote:             
+remote:      (?) Learn how to resolve a blocked push        
+remote:      https://docs.github.com/code-security/secret-scanning/working-with-secret-scanning-and-push-protection/working-with-push-protection-from-the-command-line#resolving-a-blocked-push        
+remote:             
+remote:             
+remote:       —— GitHub Personal Access Token ——————————————————————        
+remote:        locations:        
+remote:          - commit: cdd1e68849301347649b695c972814c7635be5fc        
+remote:            path: ben10_data/logs/klippy.log.2025-05-03:1174        
+remote:             
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.        
+remote:        https://github.com/Bradford1040/BEN10/security/secret-scanning/unblock-secret/2wvUzEr0rD4jQlpASqmdr50zla3        
+remote:             
+remote: 
+remote: 
+
+To https://github.com/Bradford1040/BEN10.git
+ ! [remote rejected] devel-ben10 -> devel-ben10 (push declined due to repository rule violations)
+error: failed to push some refs to 'https://github.com/Bradford1040/BEN10.git'
+
+Command {update_git_script} finished
+
