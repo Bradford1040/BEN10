@@ -1256,3 +1256,25 @@ error: failed to push some refs to 'https://github.com/Bradford1040/BEN10.git'
 
 Command {update_git_script} finished
 
+Running Command {update_git_script}...:
+[Lock] Acquired lock: /home/octo/config_backup/.script.lock
+
+[K[1;92m●[0m Checking for installed dependencies [1;92mDone![0m
+
+
+tput: No value for $TERM and no -T specified
+
+Klipper-Backup is up to date
+
+
+Branch: devel-ben10 in .env does not match the currently checked out branch of: devel-kane.
+
+Switched to branch 'devel-ben10'
+
+From https://github.com/Bradford1040/BEN10
+ * branch            devel-ben10 -> FETCH_HEAD
+
+Already up to date.
+
+Skipping symbolic link: ben10_data/config/KAMP
+
