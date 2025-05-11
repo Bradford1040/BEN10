@@ -1,0 +1,455 @@
+-------------------- Log Start | Fri May  9 04:50:39 2025 --------------------
+platform: Linux-6.14.4-061404-generic-x86_64-with-glibc2.41
+data_path: /home/octo/ben10_data
+is_default_data_path: False
+config_file: /home/octo/ben10_data/config/moonraker.conf
+backup_config: /home/octo/ben10_data/config/.moonraker.conf.bkp
+startup_warnings: []
+verbose: False
+debug: False
+asyncio_debug: False
+is_backup_config: False
+is_python_package: False
+instance_uuid: 7f0ca56182064c6f8821005c8f278fc1
+unix_socket_path: /home/octo/ben10_data/comms/moonraker.sock
+structured_logging: False
+software_version: v0.9.3-74-g1c12414
+git_branch: master
+git_remote: origin
+git_repo_url: https://github.com/Arksine/moonraker.git
+modified_files: []
+unofficial_components: []
+log_file: /home/octo/ben10_data/logs/moonraker.log
+python_version: 3.13.3 (main, Apr  8 2025, 19:55:40) [GCC 14.2.0]
+launch_args: /home/octo/moonraker-env/bin/python /home/octo/moonraker/moonraker/moonraker.py -d /home/octo/ben10_data
+msgspec_enabled: False
+uvloop_enabled: False
+
+#################### Moonraker Configuration ####################
+
+[server]
+host = 0.0.0.0
+port = 7127
+klippy_uds_address = /home/octo/ben10_data/comms/klippy.sock
+
+[authorization]
+trusted_clients = 
+	10.0.0.0/16
+	10.0.0.0/8
+	127.0.0.0/8
+	169.254.0.0/16
+	172.16.0.0/12
+	192.168.0.0/16
+	FE80::/10
+	::1/128
+cors_domains = 
+	*.lan
+	*.local
+	*://localhost
+	*://localhost:*
+	*://rhino*
+	*://*.server.internal
+	*://rhino.server.internal:*
+	*://rhino.server.internal
+	https://10.0.0.138:*
+	https://10.0.0.138
+
+[octoprint_compat]
+
+[spoolman]
+server = http://rhino:7912
+sync_rate = 5
+
+[history]
+
+[file_manager]
+enable_object_processing = True
+
+[update_manager]
+channel = dev
+refresh_interval = 12
+enable_system_updates = False
+enable_auto_refresh = True
+
+[update_manager mainsail]
+type = web
+channel = stable
+repo = mainsail-crew/mainsail
+path = ~/mainsail
+
+[update_manager Klipper-Adaptive-Meshing-Purging]
+type = git_repo
+channel = dev
+path = ~/Klipper-Adaptive-Meshing-Purging
+origin = https://github.com/Bradford1040/Klipper-Adaptive-Meshing-Purging.git
+managed_services = klipper
+primary_branch = main
+
+[update_manager klipper-backup]
+type = git_repo
+path = ~/ben10_data/klipper-backup
+origin = https://github.com/Bradford1040/klipper-backup.git
+managed_services = moonraker
+primary_branch = devel-v3.0
+
+[update_manager Spoolman]
+type = zip
+channel = stable
+repo = Donkie/Spoolman
+path = /home/octo/Spoolman
+virtualenv = .venv
+requirements = requirements.txt
+persistent_files = 
+	.venv
+	.env
+managed_services = Spoolman
+
+[update_manager klipper_tmc_autotune]
+type = git_repo
+channel = dev
+path = ~/klipper_tmc_autotune
+origin = https://github.com/Bradford1040/klipper_tmc_autotune.git
+managed_services = klipper
+primary_branch = master
+install_script = install.sh
+
+#################################################################
+All Configuration Files:
+/home/octo/ben10_data/config/moonraker.conf
+#################################################################
+Loading Sqlite database provider. Sqlite Version: 3.46.1
+Unsafe Shutdown Count: 5
+
+System Info:
+
+***python***
+  version: (3, 13, 3, 'final', 0)
+  version_string: 3.13.3 (main, Apr  8 2025, 19:55:40) [GCC 14.2.0]
+
+***cpu_info***
+  cpu_count: 8
+  bits: 64bit
+  processor: x86_64
+  cpu_desc: Intel(R) Core(TM) i7-7820HK CPU @ 2.90GHz
+  serial_number: 
+  hardware_desc: 
+  model: 
+  total_memory: 16327400
+  memory_units: kB
+
+***sd_info***
+
+***distribution***
+  name: Rhino Linux 2025.2 (mainline)
+  id: ubuntu
+  version: 2025.2
+  version_parts: {'major': '2025', 'minor': '2', 'build_number': ''}
+  like: debian
+  codename: devel
+  release_info: {}
+  kernel_version: 6.14.4-061404-generic
+
+***virtualization***
+  virt_type: none
+  virt_identifier: none
+
+***network***
+
+***canbus***
+
+***Allowed Services***
+  klipper_mcu
+  webcamd
+  MoonCord
+  KlipperScreen
+  moonraker-telegram-bot
+  moonraker-obico
+  sonar
+  crowsnest
+  octoeverywhere
+  ratos-configurator
+  Spoolman
+  klipper-backup
+Module libcamera unavailable, import failed
+
+Systemd unit moonraker-ben10.service:
+unit_name: moonraker-ben10.service
+is_default: False
+manager: systemd
+Properties:
+**Requires=['sysinit.target', 'network-online.target', 'system.slice', 'home.mount', '-.mount']
+**After=['basic.target', 'system.slice', 'network-online.target', 'sysinit.target', '-.mount', 'systemd-journald.socket', 'home.mount']
+**SupplementaryGroups=['moonraker-admin']
+**EnvironmentFiles=/home/octo/ben10_data/systemd/moonraker.env
+**ExecStart=/home/octo/moonraker-env/bin/python $MOONRAKER_ARGS
+**WorkingDirectory=/home/octo/moonraker
+**FragmentPath=/etc/systemd/system/moonraker-ben10.service
+**Description=API Server for Klipper SV1 ben10
+**User=octo
+
+Systemd unit klipper-ben10.service:
+unit_name: klipper-ben10.service
+is_default: False
+manager: systemd
+Properties:
+**Requires=['sysinit.target', 'system.slice', 'home.mount', '-.mount']
+**After=['home.mount', 'systemd-journald.socket', 'basic.target', '-.mount', 'network-online.target', 'system.slice', 'sysinit.target']
+**SupplementaryGroups=[]
+**EnvironmentFiles=/home/octo/ben10_data/systemd/klipper.env
+**ExecStart=/home/octo/klippy-env/bin/python $KLIPPER_ARGS
+**WorkingDirectory=/home/octo/klipper
+**FragmentPath=/etc/systemd/system/klipper-ben10.service
+**Description=Klipper 3D Printer Firmware SV1
+**User=octo
+Multiple instances of Moonraker have the update manager enabled.
+moonraker-pascale:b994aea97c7a4c0f92ada68092db6f56:1572
+moonraker-able:cca50902716f4e06920fbddaeaff39ab:1566
+moonraker-phenoix:3f1d3310bc824d0eaef1d8c35ed8fb8c:1573
+moonraker-murphy:bb2e0d0e7ef945368e1a06b160782450:1570
+moonraker-bastard:07846642785b482e8652cf586e89e670:1567
+moonraker-kane:bc035524ff81449db200b4bcf842a876:1569
+moonraker-punisher:9dcc6c0e41664e1eba2a9b2fab5413d4:21244
+moonraker-ben10:7f0ca56182064c6f8821005c8f278fc1:28101
+Git Repo moonraker: No warnings detected
+Connected to Spoolman Spool Manager
+Git Repo klipper: Warnings detected:
+  Unofficial remote url: https://github.com/KalicoCrew/kalico
+  Repo not on offical remote/branch, expected: origin/master, detected: origin/bleeding-edge-v2
+  Repo has untracked source files: ['klippy/extras/autotune_tmc.py', 'klippy/extras/motor_constants.py']
+Git Repo Klipper-Adaptive-Meshing-Purging: No warnings detected
+Git Repo klipper-backup: No warnings detected
+Git Repo klipper_tmc_autotune: No warnings detected
+Klipper Version: v0.12.0-696-g9eac41f9
+2025-05-09 00:50:39,428 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker status --porcelain -b) successfully finished
+2025-05-09 00:50:39,430 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker branch --list --no-color) successfully finished
+2025-05-09 00:50:39,433 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker remote get-url origin) successfully finished
+2025-05-09 00:50:39,734 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker fetch origin --prune --progress) successfully finished
+2025-05-09 00:50:39,739 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker merge-base --is-ancestor HEAD origin/master) successfully finished
+2025-05-09 00:50:39,744 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker rev-parse HEAD) successfully finished
+2025-05-09 00:50:39,753 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker describe --always --tags --long --dirty --abbrev=8) successfully finished
+2025-05-09 00:50:39,758 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker rev-parse origin/master) successfully finished
+2025-05-09 00:50:39,767 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker describe origin/master --always --tags --long --abbrev=8) successfully finished
+2025-05-09 00:50:39,773 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/moonraker rev-list HEAD..1c124149720e24f52b80ce82ce906e69476b7724 --count) successfully finished
+2025-05-09 00:50:39,773 [git_deploy.py:log_repo_info()] - Git Repo moonraker Detected:
+Owner: Arksine
+Repository Name: moonraker
+Path: /home/octo/moonraker
+Remote: origin
+Branch: master
+Remote URL: https://github.com/Arksine/moonraker.git
+Recovery URL: https://github.com/Arksine/moonraker.git
+Current Commit SHA: 1c124149720e24f52b80ce82ce906e69476b7724
+Upstream Commit SHA: 1c124149720e24f52b80ce82ce906e69476b7724
+Current Version: v0.9.3-74-g1c124149
+Upstream Version: v0.9.3-74-g1c124149
+Rollback Commit: 7cdcca3cb4b7caf27d511d1c4e32fa3297391709
+Rollback Branch: master
+Rollback Version: v0.9.3-72-g7cdcca3c
+Is Dirty: False
+Is Detached: False
+Is Shallow: False
+Commits Behind Count: 0
+Diverged: False
+Pinned Commit: None
+2025-05-09 00:50:39,773 [base_deploy.py:log_info()] - Git Repo moonraker: Channel: dev
+2025-05-09 00:50:39,773 [base_deploy.py:log_info()] - Git Repo moonraker: Validity check for git repo passed
+2025-05-09 00:50:39,787 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper status --porcelain -b) successfully finished
+2025-05-09 00:50:39,791 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper branch --list --no-color) successfully finished
+2025-05-09 00:50:39,796 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper remote get-url origin) successfully finished
+2025-05-09 00:50:39,796 [git_deploy.py:_check_moved_origin()] - Git repo klipper: Performing moved origin check - https://github.com/kalicocrew/kalico
+2025-05-09 00:50:40,761 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper fetch origin --prune --progress) successfully finished
+2025-05-09 00:50:40,764 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper merge-base --is-ancestor HEAD origin/bleeding-edge-v2) successfully finished
+2025-05-09 00:50:40,765 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper rev-parse HEAD) successfully finished
+2025-05-09 00:50:40,802 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper describe --always --tags --long --dirty --abbrev=8) successfully finished
+2025-05-09 00:50:40,804 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper rev-parse origin/bleeding-edge-v2) successfully finished
+2025-05-09 00:50:40,840 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper describe origin/bleeding-edge-v2 --always --tags --long --abbrev=8) successfully finished
+2025-05-09 00:50:40,842 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper rev-list HEAD..9eac41f99ac96f01e0c74e57c64b6a4b2674c494 --count) successfully finished
+2025-05-09 00:50:40,843 [git_deploy.py:log_repo_info()] - Git Repo klipper Detected:
+Owner: KalicoCrew
+Repository Name: kalico
+Path: /home/octo/klipper
+Remote: origin
+Branch: bleeding-edge-v2
+Remote URL: https://github.com/KalicoCrew/kalico
+Recovery URL: https://github.com/KalicoCrew/kalico
+Current Commit SHA: 9eac41f99ac96f01e0c74e57c64b6a4b2674c494
+Upstream Commit SHA: 9eac41f99ac96f01e0c74e57c64b6a4b2674c494
+Current Version: v0.12.0-696-g9eac41f9
+Upstream Version: v0.12.0-696-g9eac41f9
+Rollback Commit: 9eac41f99ac96f01e0c74e57c64b6a4b2674c494
+Rollback Branch: bleeding-edge-v2
+Rollback Version: v0.12.0-696-g9eac41f9
+Is Dirty: False
+Is Detached: False
+Is Shallow: False
+Commits Behind Count: 0
+Diverged: False
+Pinned Commit: None
+Repo Warnings:
+  Unofficial remote url: https://github.com/KalicoCrew/kalico
+  Repo not on offical remote/branch, expected: origin/master, detected: origin/bleeding-edge-v2
+  Repo has untracked source files: ['klippy/extras/autotune_tmc.py', 'klippy/extras/motor_constants.py']
+2025-05-09 00:50:40,843 [base_deploy.py:log_info()] - Git Repo klipper: Channel: dev
+2025-05-09 00:50:40,843 [base_deploy.py:log_info()] - Git Repo klipper: Validity check for git repo passed
+2025-05-09 00:50:41,053 [base_deploy.py:log_info()] - Web Client mainsail: Detected
+Repo: mainsail-crew/mainsail
+Channel: stable
+Path: /home/octo/mainsail
+Local Version: v2.14.0
+Remote Version: v2.14.0
+Valid: True
+Fallback Detected: False
+Pre-release: False
+Download Url: https://github.com/mainsail-crew/mainsail/releases/download/v2.14.0/mainsail.zip
+Download Size: 2848929
+Content Type: application/zip
+Rollback Version: v2.13.2
+Rollback Repo: mainsail-crew/mainsail
+2025-05-09 00:50:41,063 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging status --porcelain -b) successfully finished
+2025-05-09 00:50:41,070 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging branch --list --no-color) successfully finished
+2025-05-09 00:50:41,081 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging remote get-url origin) successfully finished
+2025-05-09 00:50:41,408 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging fetch origin --prune --progress) successfully finished
+2025-05-09 00:50:41,414 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging merge-base --is-ancestor HEAD origin/main) successfully finished
+2025-05-09 00:50:41,420 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging rev-parse HEAD) successfully finished
+2025-05-09 00:50:41,432 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging describe --always --tags --long --dirty --abbrev=8) successfully finished
+2025-05-09 00:50:41,438 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging rev-parse origin/main) successfully finished
+2025-05-09 00:50:41,449 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging describe origin/main --always --tags --long --abbrev=8) successfully finished
+2025-05-09 00:50:41,457 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/Klipper-Adaptive-Meshing-Purging rev-list HEAD..00a076da82d73c50174ceb957035a2898ea7f495 --count) successfully finished
+2025-05-09 00:50:41,457 [git_deploy.py:log_repo_info()] - Git Repo Klipper-Adaptive-Meshing-Purging Detected:
+Owner: Bradford1040
+Repository Name: Klipper-Adaptive-Meshing-Purging
+Path: /home/octo/Klipper-Adaptive-Meshing-Purging
+Remote: origin
+Branch: main
+Remote URL: https://github.com/Bradford1040/Klipper-Adaptive-Meshing-Purging.git
+Recovery URL: https://github.com/Bradford1040/Klipper-Adaptive-Meshing-Purging.git
+Current Commit SHA: 00a076da82d73c50174ceb957035a2898ea7f495
+Upstream Commit SHA: 00a076da82d73c50174ceb957035a2898ea7f495
+Current Version: v1.1.2-22-g00a076da
+Upstream Version: v1.1.2-22-g00a076da
+Rollback Commit: 00a076da82d73c50174ceb957035a2898ea7f495
+Rollback Branch: main
+Rollback Version: v1.1.2-22-g00a076da
+Is Dirty: False
+Is Detached: False
+Is Shallow: False
+Commits Behind Count: 0
+Diverged: False
+Pinned Commit: None
+2025-05-09 00:50:41,457 [base_deploy.py:log_info()] - Git Repo Klipper-Adaptive-Meshing-Purging: Channel: dev
+2025-05-09 00:50:41,457 [base_deploy.py:log_info()] - Git Repo Klipper-Adaptive-Meshing-Purging: Validity check for git repo passed
+2025-05-09 00:50:41,467 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup status --porcelain -b) successfully finished
+2025-05-09 00:50:41,473 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup branch --list --no-color) successfully finished
+2025-05-09 00:50:41,485 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup remote get-url origin) successfully finished
+2025-05-09 00:50:41,869 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup fetch origin --prune --progress) successfully finished
+2025-05-09 00:50:41,877 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup merge-base --is-ancestor HEAD origin/devel-v3.0) successfully finished
+2025-05-09 00:50:41,883 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup rev-parse HEAD) successfully finished
+2025-05-09 00:50:41,898 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup describe --always --tags --long --dirty --abbrev=8) successfully finished
+2025-05-09 00:50:41,904 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup rev-parse origin/devel-v3.0) successfully finished
+2025-05-09 00:50:41,918 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup describe origin/devel-v3.0 --always --tags --long --abbrev=8) successfully finished
+2025-05-09 00:50:41,926 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/ben10_data/klipper-backup rev-list HEAD..be4d9a692269f515c04d650df73c49f66c21c967 --count) successfully finished
+2025-05-09 00:50:41,926 [git_deploy.py:log_repo_info()] - Git Repo klipper-backup Detected:
+Owner: Bradford1040
+Repository Name: klipper-backup
+Path: /home/octo/ben10_data/klipper-backup
+Remote: origin
+Branch: devel-v3.0
+Remote URL: https://github.com/Bradford1040/klipper-backup.git
+Recovery URL: https://github.com/Bradford1040/klipper-backup.git
+Current Commit SHA: be4d9a692269f515c04d650df73c49f66c21c967
+Upstream Commit SHA: be4d9a692269f515c04d650df73c49f66c21c967
+Current Version: v1.3.3-65-gbe4d9a69
+Upstream Version: v1.3.3-65-gbe4d9a69
+Rollback Commit: ae924faa41ab8e0ab0301414eacc8321ce1934af
+Rollback Branch: devel-v3.0
+Rollback Version: v1.3.3-64-gae924faa
+Is Dirty: False
+Is Detached: False
+Is Shallow: False
+Commits Behind Count: 0
+Diverged: False
+Pinned Commit: None
+2025-05-09 00:50:41,926 [base_deploy.py:log_info()] - Git Repo klipper-backup: Channel: dev
+2025-05-09 00:50:41,926 [base_deploy.py:log_info()] - Git Repo klipper-backup: Validity check for git repo passed
+2025-05-09 00:50:42,144 [base_deploy.py:log_info()] - Zip Application Spoolman: Detected
+Repo: Donkie/Spoolman
+Channel: stable
+Path: /home/octo/Spoolman
+Local Version: v0.22.1
+Remote Version: v0.22.1
+Valid: True
+Fallback Detected: False
+Pre-release: False
+Download Url: https://github.com/Donkie/Spoolman/releases/download/v0.22.1/spoolman.zip
+Download Size: 2007875
+Content Type: application/zip
+Rollback Version: v0.22.1
+Rollback Repo: Donkie/Spoolman
+2025-05-09 00:50:42,147 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune status --porcelain -b) successfully finished
+2025-05-09 00:50:42,150 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune branch --list --no-color) successfully finished
+2025-05-09 00:50:42,155 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune remote get-url origin) successfully finished
+2025-05-09 00:50:42,450 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune fetch origin --prune --progress) successfully finished
+2025-05-09 00:50:42,456 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune merge-base --is-ancestor HEAD origin/master) successfully finished
+2025-05-09 00:50:42,462 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune rev-parse HEAD) successfully finished
+2025-05-09 00:50:42,476 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune describe --always --tags --long --dirty --abbrev=8) successfully finished
+2025-05-09 00:50:42,481 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune rev-parse origin/master) successfully finished
+2025-05-09 00:50:42,490 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune describe origin/master --always --tags --long --abbrev=8) successfully finished
+2025-05-09 00:50:42,495 [shell_command.py:_check_proc_success()] - Command (git -C /home/octo/klipper_tmc_autotune rev-list HEAD..b84db69d4ba504a8359ccc821768d78d36dcec43 --count) successfully finished
+2025-05-09 00:50:42,496 [git_deploy.py:log_repo_info()] - Git Repo klipper_tmc_autotune Detected:
+Owner: Bradford1040
+Repository Name: klipper_tmc_autotune
+Path: /home/octo/klipper_tmc_autotune
+Remote: origin
+Branch: master
+Remote URL: https://github.com/Bradford1040/klipper_tmc_autotune.git
+Recovery URL: https://github.com/Bradford1040/klipper_tmc_autotune.git
+Current Commit SHA: b84db69d4ba504a8359ccc821768d78d36dcec43
+Upstream Commit SHA: b84db69d4ba504a8359ccc821768d78d36dcec43
+Current Version: v0.2.0-235-gb84db69d
+Upstream Version: v0.2.0-235-gb84db69d
+Rollback Commit: b84db69d4ba504a8359ccc821768d78d36dcec43
+Rollback Branch: master
+Rollback Version: v0.2.0-235-gb84db69d
+Is Dirty: False
+Is Detached: False
+Is Shallow: False
+Commits Behind Count: 0
+Diverged: False
+Pinned Commit: None
+2025-05-09 00:50:42,496 [base_deploy.py:log_info()] - Git Repo klipper_tmc_autotune: Channel: dev
+2025-05-09 00:50:42,496 [base_deploy.py:log_info()] - Git Repo klipper_tmc_autotune: Validity check for git repo passed
+2025-05-09 02:09:59,573 [websockets.py:on_close()] - Websocket Closed: ID: 134534701217936 Close Code: 1001, Close Reason: None, Pong Time Elapsed: 9.63
+2025-05-09 07:14:16,203 [machine.py:_find_public_ip()] - Detected Local IP: 10.0.0.138
+2025-05-09 11:44:54,690 [authorization.py:_check_trusted_connection()] - Trusted Connection Detected, IP: 10.0.0.190
+2025-05-09 11:44:54,691 [application.py:log_request()] - 101 GET /websocket (10.0.0.190) [_TRUSTED_USER_] 0.70ms
+2025-05-09 11:44:54,691 [websockets.py:open()] - Websocket Opened: ID: 134534690623952, Proxied: False, User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36, Host Name: rhino
+2025-05-09 11:44:55,384 [file_manager.py:get_file_list()] - Updating File List <config>...
+2025-05-09 12:45:39,442 [authorization.py:_prune_conn_handler()] - Trusted Connection Expired, IP: 10.0.0.190
+2025-05-09 15:27:15,972 [websockets.py:on_close()] - Websocket Closed: ID: 134534690623952 Close Code: 1001, Close Reason: None, Pong Time Elapsed: 1.28
+2025-05-09 15:27:30,813 [authorization.py:_check_trusted_connection()] - Trusted Connection Detected, IP: 10.0.0.190
+2025-05-09 15:27:30,814 [application.py:log_request()] - 101 GET /websocket (10.0.0.190) [_TRUSTED_USER_] 1.61ms
+2025-05-09 15:27:30,814 [websockets.py:open()] - Websocket Opened: ID: 134534690625232, Proxied: False, User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36, Host Name: rhino
+2025-05-09 15:27:30,939 [file_manager.py:get_file_list()] - Updating File List <config>...
+2025-05-09 15:27:31,585 [application.py:log_request()] - 101 GET /websocket (10.0.0.190) [_TRUSTED_USER_] 0.42ms
+2025-05-09 15:27:31,585 [websockets.py:open()] - Websocket Opened: ID: 134534690635152, Proxied: False, User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36, Host Name: rhino
+2025-05-09 15:27:31,617 [application.py:log_request()] - 101 GET /websocket (10.0.0.190) [_TRUSTED_USER_] 0.39ms
+2025-05-09 15:27:31,617 [websockets.py:open()] - Websocket Opened: ID: 134534701219216, Proxied: False, User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36, Host Name: rhino
+2025-05-09 15:27:31,661 [application.py:log_request()] - 101 GET /websocket (10.0.0.190) [_TRUSTED_USER_] 0.33ms
+2025-05-09 15:27:31,661 [websockets.py:open()] - Websocket Opened: ID: 134534701204816, Proxied: False, User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36, Host Name: rhino
+2025-05-09 15:27:32,090 [file_manager.py:get_file_list()] - Updating File List <config>...
+2025-05-09 15:27:32,099 [file_manager.py:get_file_list()] - Updating File List <config>...
+2025-05-09 15:27:32,187 [file_manager.py:get_file_list()] - Updating File List <config>...
+2025-05-09 15:27:52,325 [application.py:log_request()] - 101 GET /websocket (10.0.0.190) [_TRUSTED_USER_] 1.11ms
+2025-05-09 15:27:52,325 [websockets.py:open()] - Websocket Opened: ID: 134534689472592, Proxied: False, User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36, Host Name: rhino
+2025-05-09 15:27:52,579 [file_manager.py:get_file_list()] - Updating File List <config>...
+2025-05-09 15:27:54,218 [websockets.py:on_close()] - Websocket Closed: ID: 134534701219216 Close Code: 1001, Close Reason: None, Pong Time Elapsed: 2.60
+2025-05-09 15:27:54,233 [websockets.py:on_close()] - Websocket Closed: ID: 134534690625232 Close Code: 1001, Close Reason: None, Pong Time Elapsed: 3.42
+2025-05-09 15:27:54,239 [websockets.py:on_close()] - Websocket Closed: ID: 134534701204816 Close Code: 1001, Close Reason: None, Pong Time Elapsed: 2.58
+2025-05-09 15:27:54,254 [websockets.py:on_close()] - Websocket Closed: ID: 134534690635152 Close Code: 1001, Close Reason: None, Pong Time Elapsed: 2.67
+2025-05-09 15:27:57,020 [application.py:log_request()] - 101 GET /websocket (10.0.0.190) [_TRUSTED_USER_] 0.46ms
+2025-05-09 15:27:57,020 [websockets.py:open()] - Websocket Opened: ID: 134534701218576, Proxied: False, User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36, Host Name: rhino
+2025-05-09 15:27:57,040 [application.py:log_request()] - 101 GET /websocket (10.0.0.190) [_TRUSTED_USER_] 0.67ms
+2025-05-09 15:27:57,040 [websockets.py:open()] - Websocket Opened: ID: 134534701217616, Proxied: False, User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36, Host Name: rhino
+2025-05-09 15:27:57,265 [file_manager.py:get_file_list()] - Updating File List <config>...
+2025-05-09 15:27:57,280 [file_manager.py:get_file_list()] - Updating File List <config>...
+2025-05-09 16:30:39,478 [authorization.py:_prune_conn_handler()] - Trusted Connection Expired, IP: 10.0.0.190

@@ -1,0 +1,2337 @@
+===== Config file =====
+[gcode_shell_command update_git_script]
+command = bash /home/octo/ben10_data/klipper-backup/script.sh
+timeout = 90.0
+verbose = True
+
+[virtual_sdcard]
+path = /home/octo/ben10_data/gcodes
+on_error_gcode = CANCEL_PRINT
+
+[pause_resume]
+recover_velocity = 70
+
+[display_status]
+
+[respond]
+default_type = echo
+default_prefix = echo:
+enable_respond = True
+
+[gcode_macro CANCEL_PRINT]
+description = Cancel the actual running print
+rename_existing = BASE_CANCEL_PRINT
+gcode = 
+	TURN_OFF_HEATERS
+	CLEAR_PAUSE
+	SDCARD_RESET_FILE
+	BASE_CANCEL_PRINT
+	G91
+	G1 E-5 F2100
+	G1 Z10
+	G90
+	G1 X300 Y300 F6000
+
+[gcode_macro PAUSE]
+description = Pause the actual running print
+rename_existing = BASE_PAUSE
+gcode = 
+	SAVE_GCODE_STATE NAME=PAUSE_state
+	BASE_PAUSE
+	G91
+	G1 E-2 F2100
+	G1 Z10
+	G90
+	G1 X5 Y5 F4000
+
+[gcode_macro RESUME]
+description = Resume the actual running print
+rename_existing = BASE_RESUME
+variable_last_extruder_temp = {'restore': False, 'temp': 0}
+variable_restore_idle_timeout = 0
+variable_idle_state = False
+gcode = 
+	G91
+	G1 E1.1 F2100
+	G90
+	RESTORE_GCODE_STATE NAME=PAUSE_state MOVE=1
+	BASE_RESUME
+
+[gcode_macro SET_PAUSE_NEXT_LAYER]
+description = Enable a pause if the next layer is reached
+gcode = 
+	{% set pause_next_layer = printer['gcode_macro SET_PRINT_STATS_INFO'].pause_next_layer %}
+	{% set ENABLE = params.ENABLE|default(1)|int != 0 %}
+	{% set MACRO = params.MACRO|default(pause_next_layer.call, True) %}
+	SET_GCODE_VARIABLE MACRO=SET_PRINT_STATS_INFO VARIABLE=pause_next_layer VALUE="{{ 'enable': ENABLE, 'call': MACRO }}"
+
+[gcode_macro SET_PAUSE_AT_LAYER]
+description = Enable/disable a pause if a given layer number is reached
+gcode = 
+	{% set pause_at_layer = printer['gcode_macro SET_PRINT_STATS_INFO'].pause_at_layer %}
+	{% set ENABLE = params.ENABLE|int != 0 if params.ENABLE is defined
+	else params.LAYER is defined %}
+	{% set LAYER = params.LAYER|default(pause_at_layer.layer)|int %}
+	{% set MACRO = params.MACRO|default(pause_at_layer.call, True) %}
+	SET_GCODE_VARIABLE MACRO=SET_PRINT_STATS_INFO VARIABLE=pause_at_layer VALUE="{{ 'enable': ENABLE, 'layer': LAYER, 'call': MACRO }}"
+
+[gcode_macro SET_PRINT_STATS_INFO]
+rename_existing = SET_PRINT_STATS_INFO_BASE
+description = Overwrite, to get pause_next_layer and pause_at_layer feature
+variable_pause_next_layer = { 'enable': False, 'call': "PAUSE" }
+variable_pause_at_layer = { 'enable': False, 'layer': 0, 'call': "PAUSE" }
+gcode = 
+	{% if pause_next_layer.enable %}
+	RESPOND TYPE=echo MSG='{"%s, forced by pause_next_layer" % pause_next_layer.call}'
+	{pause_next_layer.call}
+	SET_PAUSE_NEXT_LAYER ENABLE=0
+	{% elif pause_at_layer.enable and params.CURRENT_LAYER is defined and params.CURRENT_LAYER|int == pause_at_layer.layer %}
+	RESPOND TYPE=echo MSG='{"%s, forced by pause_at_layer [%d]" % (pause_at_layer.call, pause_at_layer.layer)}'
+	{pause_at_layer.call}
+	SET_PAUSE_AT_LAYER ENABLE=0
+	{% endif %}
+	SET_PRINT_STATS_INFO_BASE {rawparams}
+
+[gcode_macro _TOOLHEAD_PARK_PAUSE_CANCEL]
+description = Helper: park toolhead used in PAUSE and CANCEL_PRINT
+gcode = 
+	
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE']|default({}) %}
+	{% set velocity = printer.configfile.settings.pause_resume.recover_velocity %}
+	{% set use_custom     = client.use_custom_pos|default(false)|lower == 'true' %}
+	{% set custom_park_x  = client.custom_park_x|default(0.0) %}
+	{% set custom_park_y  = client.custom_park_y|default(0.0) %}
+	{% set park_dz        = client.custom_park_dz|default(2.0)|abs %}
+	{% set sp_hop         = client.speed_hop|default(15) * 60 %}
+	{% set sp_move        = client.speed_move|default(velocity) * 60 %}
+	
+	{% set origin    = printer.gcode_move.homing_origin %}
+	{% set act       = printer.gcode_move.gcode_position %}
+	{% set max       = printer.toolhead.axis_maximum %}
+	{% set cone      = printer.toolhead.cone_start_z|default(max.z) %}
+	{% set round_bed = True if printer.configfile.settings.printer.kinematics is in ['delta','polar','rotary_delta','winch']
+	else False %}
+	
+	{% set z_min = params.Z_MIN|default(0)|float %}
+	{% set z_park = [[(act.z + park_dz), z_min]|max, (max.z - origin.z)]|min %}
+	{% set x_park = params.X       if params.X is defined
+	else custom_park_x  if use_custom
+	else 0.0            if round_bed
+	else (max.x - 5.0) %}
+	{% set y_park = params.Y       if params.Y is defined
+	else custom_park_y  if use_custom
+	else (max.y - 5.0)  if round_bed and z_park < cone
+	else 0.0            if round_bed
+	else (max.y - 5.0) %}
+	
+	_CLIENT_RETRACT
+	{% if "xyz" in printer.toolhead.homed_axes %}
+	G90
+	G1 Z{z_park} F{sp_hop}
+	G1 X{x_park} Y{y_park} F{sp_move}
+	{% if not printer.gcode_move.absolute_coordinates %} G91 {% endif %}
+	{% else %}
+	RESPOND TYPE=echo MSG='Printer not homed'
+	{% endif %}
+
+[gcode_macro _CLIENT_EXTRUDE]
+description = Extrudes, if the extruder is hot enough
+gcode = 
+	
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE']|default({}) %}
+	{% set use_fw_retract = (client.use_fw_retract|default(false)|lower == 'true') and (printer.firmware_retraction is defined) %}
+	{% set length = params.LENGTH|default(client.unretract)|default(1.0)|float %}
+	{% set speed = params.SPEED|default(client.speed_unretract)|default(35) %}
+	{% set absolute_extrude = printer.gcode_move.absolute_extrude %}
+	
+	{% if printer.toolhead.extruder != '' %}
+	{% if printer[printer.toolhead.extruder].can_extrude %}
+	{% if use_fw_retract %}
+	{% if length < 0 %}
+	G10
+	{% else %}
+	G11
+	{% endif %}
+	{% else %}
+	M83
+	G1 E{length} F{(speed|float|abs) * 60}
+	{% if absolute_extrude %}
+	M82
+	{% endif %}
+	{% endif %}
+	{% else %}
+	RESPOND TYPE=echo MSG='{"\"%s\" not hot enough" % printer.toolhead.extruder}'
+	{% endif %}
+	{% endif %}
+
+[gcode_macro _CLIENT_RETRACT]
+description = Retracts, if the extruder is hot enough
+gcode = 
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE']|default({}) %}
+	{% set length = params.LENGTH|default(client.retract)|default(1.0)|float %}
+	{% set speed = params.SPEED|default(client.speed_retract)|default(35) %}
+	
+	_CLIENT_EXTRUDE LENGTH=-{length|float|abs} SPEED={speed|float|abs}
+
+[gcode_macro _CLIENT_LINEAR_MOVE]
+description = Linear move with save and restore of the gcode state
+gcode = 
+	{% set x_move = "X" ~ params.X if params.X is defined else "" %}
+	{% set y_move = "Y" ~ params.Y if params.Y is defined else "" %}
+	{% set z_move = "Z" ~ params.Z if params.Z is defined else "" %}
+	{% set e_move = "E" ~ params.E if params.E is defined else "" %}
+	{% set rate = "F" ~ params.F if params.F is defined else "" %}
+	{% set ABSOLUTE = params.ABSOLUTE | default(0) | int != 0 %}
+	{% set ABSOLUTE_E = params.ABSOLUTE_E | default(0) | int != 0 %}
+	SAVE_GCODE_STATE NAME=_client_movement
+	{% if x_move or y_move or z_move %}
+	G9{ 0 if ABSOLUTE else 1 }
+	{% endif %}
+	{% if e_move %}
+	M8{ 2 if ABSOLUTE_E else 3 }
+	{% endif %}
+	G1 { x_move } { y_move } { z_move } { e_move } { rate }
+	RESTORE_GCODE_STATE NAME=_client_movement
+
+[gcode_macro _CLIENT_VARIABLE]
+gcode = 
+	variable_use_custom_pos   : True
+	variable_custom_park_x    : 300.0
+	variable_custom_park_y    : 300.0
+	variable_custom_park_dz   : 10.0
+	variable_retract          : 2.0
+	variable_cancel_retract   : 2.0
+	variable_speed_retract    : 85.0
+	variable_unretract        : 1.0
+	variable_speed_unretract  : 45.0
+	variable_speed_hop        : 15.0
+	variable_speed_move       : 100.0
+	variable_park_at_cancel   : True
+	variable_park_at_cancel_x : True
+	variable_park_at_cancel_y : True
+	
+	variable_use_fw_retract   : True
+	variable_idle_timeout     : 7800
+
+[gcode_macro BACK_UP_GITHUB]
+gcode = 
+	RUN_SHELL_COMMAND CMD=update_git_script
+
+[gcode_macro FAKE_POSITION]
+gcode = 
+	SET_KINEMATIC_POSITION X=10 Y=10 Z=10
+
+[gcode_macro CALIBRATE_HOME]
+gcode = 
+	M190 S72
+	M109 S220
+	M400
+	_B28
+	Z_ENDSTOP_CALIBRATE
+
+[gcode_macro _B28]
+gcode = 
+	{% if "xyz" not in printer.toolhead.homed_axes %}
+	G28
+	{% endif %}
+
+[gcode_macro PERCISE_HOME]
+gcode = 
+	G28
+
+[gcode_macro G28]
+rename_existing = G28.8888888888
+gcode = 
+	FAKE_POSITION
+	G4 P4000
+	G1 Z20
+	G4 P2000
+	M117 Homing
+	G90
+	G28.8888888888 Y
+	G1 Y5 F1800
+	G4 P2000
+	G28.8888888888 X
+	G1 X5 F1800
+	G4 P2000
+	G28.8888888888 Z
+	M117 Homed
+
+[gcode_macro PRIME_EXTRUDER]
+gcode = 
+	
+	M117 Priming Line
+	G92 E0
+	G1 X5.1 Y20 Z0.5 F3000
+	G1 X5.1 Y200 Z0.28 F1800.0 E35; Draw the first line
+	G92 E0
+	G1 X5.4 Y200 Z0.28 F5000.0; Move to the side a little
+	G1 X5.4 Y20.0 Z0.28 F1800.0 E25; Draw the second line
+	G92 E0
+	G1 F2400 E-1.5
+	G92 E0
+	G1 Z2.0 F3000
+	SMART_PARK
+	M117 Away We Go
+
+[gcode_macro START_PRINT]
+gcode = 
+	_SET_MPC_MATERIAL MATERIAL={params.MATERIAL}
+	{% set BED_TEMP = params.BED_TEMP|default(70) | float %}
+	{% set EXTRUDER_TEMP = params.EXTRUDER_TEMP|default(170) | float %}
+	
+	
+	
+	M117 PRE-Heating bed
+	M140 S{BED_TEMP}
+	
+	M117 PRE-Heating nozzle
+	M104 S170
+	
+	G90
+	M73
+	
+	SET_GCODE_OFFSET Z=0.0
+	
+	_B28
+	
+	G1 Z5 F3000
+	
+	G1 Z0.45 F300
+	
+	M190 S{BED_TEMP}
+	
+	M109 S{EXTRUDER_TEMP}
+	
+	PRIME_EXTRUDER
+
+[gcode_macro END_PRINT]
+gcode = 
+	G91
+	G1 E-2 Z20 F2700
+	G90
+	G1 X300 Y300 F9000
+	M104 S0
+	M140 S0
+	M107
+	M84
+	M221 S100
+	M220 S100
+	_ADD_MAINTENANCE_TIMER
+	M117 Print Complete
+
+[gcode_macro m201]
+description = Sets maximum accelleration.
+	Usage: M201 [X<accel>] [Y<accel>]
+variable_max_accel = 1.7976931348623157e+308
+gcode = 
+	{% set km = printer["gcode_macro _km_globals"] %}
+	{% if 'X' in params or 'Y' in params %}
+	{% set accel = (params.X|default(params.Y)|float,
+	params.Y|default(params.X)|float)|min %}
+	SET_GCODE_VARIABLE MACRO=m201 VARIABLE=max_accel VALUE="{accel}"
+	{% else %}
+	SET_VELOCITY_LIMIT
+	{% endif %}
+
+[gcode_macro m203]
+description = Sets maximum velocity.
+	Usage: M203 [X<velocity>] [Y<velocity>]
+gcode = 
+	{% if 'X' in params or 'Y' in params %}
+	{% set velocity = (params.X|default(params.Y)|float,
+	params.Y|default(params.X)|float)|min %}
+	SET_VELOCITY_LIMIT VELOCITY="{velocity}"
+	{% else %}
+	SET_VELOCITY_LIMIT
+	{% endif %}
+
+[gcode_macro m205]
+description = Sets square corner velocity.
+	Usage: M203 [X<velocity>] [Y<velocity>]
+gcode = 
+	{% if 'X' in params or 'Y' in params %}
+	SET_VELOCITY_LIMIT SQUARE_CORNER_VELOCITY="{
+	(params.X|default(0)|float, params.Y|default(0)|float)|min}"
+	{% else %}
+	SET_VELOCITY_LIMIT
+	{% endif %}
+
+[gcode_macro m900]
+description = Sets pressure advance.
+	Usage: M900 [K<advance>] [T<extruder_index>]
+gcode = 
+	{% set km = printer["gcode_macro _km_globals"] %}
+	{% if km.pressure_advance_scale > 0.0 %}
+	{% set extruder = "extruder" ~ params.T|replace('0', '')
+	if "T" in params else printer.toolhead.extruder %}
+	{% if 'K' in params %}
+	SET_PRESSURE_ADVANCE EXTRUDER="{extruder}" ADVANCE="{
+	params.K|float * km.pressure_advance_scale}"
+	{% endif %}
+	{% endif %}
+
+[gcode_macro _reset_velocity_limits]
+description = Sets maximum accelleration.
+	Usage: M204 [S<accel>] [P<accel> T<accel>]
+gcode = 
+	SET_GCODE_VARIABLE MACRO=m201 VARIABLE=max_accel VALUE="{1.7976931348623157e+308}"
+
+[gcode_macro m300]
+description = Emits and audible beep.
+	Usage: M300 [P<duration>] [S<frequency>]
+gcode = 
+	{% set settings = printer.configfile.settings %}
+	{% if "output_pin beeper" in printer %}
+	{% set P = (params.P|default(100)|int, 0)|max %}
+	{% set S = (params.S|default(1000)|int, 1)|max %}
+	SET_PIN PIN=beeper VALUE={% if settings["output_pin beeper"].pwm %}{
+	settings["output_pin beeper"].scale|default(1.0) * 0.5
+	} CYCLE_TIME={ 1.0 / S }{% else %}1{% endif %}
+	G4 P{P}
+	SET_PIN PIN=beeper VALUE=0
+	{% else %}
+	{action_respond_info(
+	"M300 is disabled. To enable create an [output_pin beeper] config.")}
+	{% endif %}
+
+[gcode_macro _SET_MPC_MATERIAL]
+description = Set heater MPC parameters for a given material
+variable_filament_table = 
+	
+	{
+	
+	"PLA"       : ( 1.25, 2.00 ),
+	"PETG"      : ( 1.27, 1.93 ),
+	"PC+ABS"    : ( 1.15, 2.20 ),
+	"ABS"       : ( 1.06, 2.40 ),
+	"ASA"       : ( 1.10, 2.10 ),
+	"PA6"       : ( 1.12, 2.50 ),
+	"PA"        : ( 1.15, 2.50 ),
+	"PC"        : ( 1.20, 1.90 ),
+	"TPU"       : ( 1.21, 1.70 ),
+	"TPU-90A"   : ( 1.15, 2.00 ),
+	"TPU-95A"   : ( 1.22, 2.00 ),
+	"ABS-CF"    : ( 1.11, 2.40 ),
+	"ASA-CF"    : ( 1.11, 2.10 ),
+	"PA6-CF"    : ( 1.19, 2.50 ),
+	"PC+ABS-CF" : ( 1.22, 2.20 ),
+	"PC+CF"     : ( 1.36, 1.90 ),
+	"PLA-CF"    : ( 1.29, 2.20 ),
+	"PETG-CF"   : ( 1.30, 2.20 ),
+	}
+gcode = 
+	{% set material = params.MATERIAL | upper %}
+	{% set heater = params.HEATER | default('extruder') %}
+	{% set extruder_config = printer.configfile.settings[heater] %}
+	
+	{% if material in filament_table %}
+	{% set (density, heat_capacity) = filament_table[material] %}
+	
+	RESPOND PREFIX=🔥 MSG="Configured {heater} MPC for {material}. Density: {density}, Heat Capacity: {heat_capacity}"
+	{% else %}
+	{% set density = extruder_config.filament_density %}
+	{% set heat_capacity=extruder_config.filament_heat_capacity %}
+	
+	RESPOND PREFIX=🔥 MSG="Unknown material '{material}', using default mpc parameters for {heater}"
+	{% endif %}
+	
+	MPC_SET HEATER={heater} FILAMENT_DENSITY={density} FILAMENT_HEAT_CAPACITY={heat_capacity}
+
+[gcode_macro SET_ACTIVE_SPOOL]
+gcode = 
+	{% if params.ID %}
+	{% set id = params.ID|int %}
+	{action_call_remote_method(
+	"spoolman_set_active_spool",
+	spool_id=id
+	)}
+	{% else %}
+	{action_respond_info("Parameter 'ID' is required")}
+	{% endif %}
+
+[gcode_macro CLEAR_ACTIVE_SPOOL]
+gcode = 
+	{action_call_remote_method(
+	"spoolman_set_active_spool",
+	spool_id=None
+	)}
+
+[gcode_macro SMART_PARK]
+description = Parks your printhead near the print area for pre-print hotend heating.
+gcode = 
+	
+	{% set kamp_settings = printer["gcode_macro _KAMP_Settings"] %}
+	{% set z_height = kamp_settings.smart_park_height | float %}
+	{% set purge_margin = kamp_settings.purge_margin | float %}
+	{% set verbose_enable = kamp_settings.verbose_enable | abs %}
+	{% set center_x = printer.toolhead.axis_maximum.x / 2 | float %}
+	{% set center_y = printer.toolhead.axis_maximum.y / 2 | float %}
+	{% set axis_minimum_x = printer.toolhead.axis_minimum.x | float %}
+	{% set axis_minimum_y = printer.toolhead.axis_minimum.y | float %}
+	{% set all_points = printer.exclude_object.objects | map(attribute='polygon') | sum(start=[]) %}
+	{% set x_min = all_points | map(attribute=0) | min | default(center_x) %}
+	{% set y_min = all_points | map(attribute=1) | min | default(center_y) %}
+	{% set travel_speed = (printer.toolhead.max_velocity) * 60 | float %}
+	
+	{% if purge_margin > 0 and x_min != center_x and y_min != center_y %}
+	{% set x_min = [ x_min - purge_margin , x_min ] | min %}
+	{% set y_min = [ y_min - purge_margin , y_min ] | min %}
+	{% set x_min = [ x_min , axis_minimum_x ] | max %}
+	{% set y_min = [ y_min , axis_minimum_y ] | max %}
+	{% endif %}
+	
+	
+	{% if verbose_enable == True %}
+	
+	{ action_respond_info("Smart Park location: {},{}.".format(
+	(x_min),
+	(y_min),
+	)) }
+	
+	{% endif %}
+	
+	SAVE_GCODE_STATE NAME=Presmartpark_State
+	
+	G90
+	{% if printer.toolhead.position.z < z_height %}
+	G0 Z{z_height}
+	{% endif %}
+	G0 X{x_min} Y{y_min} F3000
+	G0 Z{z_height}
+	
+	RESTORE_GCODE_STATE NAME=Presmartpark_State
+
+[gcode_macro _KAMP_Settings]
+description = This macro contains all adjustable settings for KAMP
+variable_verbose_enable = True
+variable_mesh_margin = 15
+variable_fuzz_amount = 0
+variable_probe_dock_enable = False
+variable_attach_macro = 'Attach_Probe'
+variable_detach_macro = 'Dock_Probe'
+variable_purge_height = 0.8
+variable_tip_distance = 0
+variable_purge_margin = 10
+variable_purge_amount = 30
+variable_flow_rate = 12
+variable_smart_park_height = 10
+gcode = 
+	
+	{action_respond_info(" Running the KAMP_Settings macro does nothing, it is only used for storing KAMP settings. ")}
+
+[filament_switch_sensor runout_sensor]
+pause_on_runout = False
+runout_gcode = M600
+runout_distance = 10.0
+event_delay = 3.0
+switch_pin = PE4
+smart = True
+always_fire_events = False
+check_on_print_start = True
+
+[gcode_macro M600]
+gcode = 
+	
+	
+	
+	
+	
+	
+	SAVE_GCODE_STATE NAME=M600_state
+	PAUSE
+	
+	
+	
+	
+	
+	
+	
+	
+	UNLOAD_FILAMENT
+	SET_FILAMENT_SENSOR SENSOR=runout_sensor ENABLE=0
+
+[gcode_macro SWAP_RESUME]
+gcode = 
+	LOAD_FILAMENT
+	RESTORE_GCODE_STATE NAME=M600_state
+	SET_FILAMENT_SENSOR SENSOR=runout_sensor ENABLE=1
+	resume
+
+[idle_timeout]
+timeout = 600
+gcode = 
+	M117 Timeout reached
+	{% if printer.pause_resume.is_paused %}
+	SET_IDLE_TIMEOUT TIMEOUT=7800
+	{% else %}
+	M84
+	SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0
+	STATUS
+	M117 Need Re-Home
+	{% endif %}
+
+[gcode_macro UNLOAD_FILAMENT]
+gcode = 
+	{% set length = params.LENGTH|default(100)|float %}
+	{% set target = params.TARGET|default(240)|float %}
+	
+	{% set cur_temp = printer.extruder.temperature|float %}
+	{% set min_temp = printer.configfile.settings.extruder.min_extrude_temp|int %}
+	{% if not printer.extruder.can_extrude %}
+	RESPOND TYPE=error MSG="Below minimum temp. Heating extruder..."
+	M109 S{min_temp|int}
+	{% endif %}
+	{% if params.TARGET is defined %}
+	{% if cur_temp|float < target|float or min_temp|int < target|int %}
+	M109 S{target}
+	M117 Heating nozzle...
+	{% endif %}
+	{% endif %}
+	
+	G92 E0
+	G1 E7.0 F1200
+	G1 E2.0 F1600
+	G4 P300
+	G92 E0
+	G1 E-10.0 F4000
+	G92 E0
+	G4 P600
+	G1 E-{length} F3000
+	G92 E0
+	CLEAR_ACTIVE_SPOOL
+
+[gcode_macro LOAD_FILAMENT]
+gcode = 
+	{% set slow = params.SLOW|default(20)|float %}
+	{% set fast = params.FAST|default(40)|float %}
+	
+	{% set target = params.TARGET|default(220)|float %}
+	{% set cur_temp = printer.extruder.temperature|float %}
+	{% set min_temp = printer.configfile.settings.extruder.min_extrude_temp|int %}
+	{% if not printer.extruder.can_extrude %}
+	RESPOND TYPE=error MSG="Below minimum temp. Heating extruder..."
+	M109 S{min_temp|int}
+	{% endif %}
+	{% if params.TARGET is defined %}
+	{% if cur_temp|float < target|float or min_temp|int < target|float %}
+	M109 S{target}
+	M117 Heating nozzle...
+	{% endif %}
+	{% endif %}
+	M117  LOADING...
+	G92 E0
+	G4 P5000
+	G1 E15.0 F1000
+	G1 E{fast} F1200
+	G4 P900
+	G92 E0
+	G1 E{slow} F450
+	G92 E0
+	SET_IDLE_TIMEOUT TIMEOUT=600
+
+[gcode_macro PURGE]
+gcode = 
+	{% set LENGTH = params.LENGTH|default(45)|float %}
+	
+	{% set target = params.TARGET|default(220)|float %}
+	{% set cur_temp = printer.extruder.temperature|float %}
+	{% set min_temp = printer.configfile.settings.extruder.min_extrude_temp|int %}
+	{% if not printer.extruder.can_extrude %}
+	RESPOND TYPE=error MSG="Below minimum temp. Heating extruder..."
+	M109 S{min_temp|int}
+	{% endif %}
+	{% if params.TARGET is defined %}
+	{% if cur_temp|float < target|float or min_temp|int < target|float %}
+	M109 S{target}
+	M117 Heating nozzle...
+	{% endif %}
+	{% endif %}
+	M117 PURGING..
+	G91
+	G1 E{LENGTH} F250
+	G90
+
+[stepper_x]
+step_pin = PF0
+dir_pin = PF1
+enable_pin = !PD7
+microsteps = 16
+rotation_distance = 40
+endstop_pin = ^PE5
+position_endstop = 0
+position_min = 0
+position_max = 305
+homing_speed = 50
+homing_retract_dist = 10.0
+homing_retract_speed = 8
+second_homing_speed = 8
+use_sensorless_homing = False
+high_precision_step_compress = False
+
+[stepper_y]
+step_pin = PF6
+dir_pin = PF7
+enable_pin = !PF2
+microsteps = 16
+rotation_distance = 40
+endstop_pin = ^PJ1
+position_endstop = 0
+position_min = 0
+position_max = 305
+homing_speed = 50
+homing_retract_dist = 10.0
+homing_retract_speed = 8
+second_homing_speed = 8
+use_sensorless_homing = False
+high_precision_step_compress = False
+
+[stepper_z]
+step_pin = PL3
+dir_pin = !PL1
+enable_pin = !PK0
+microsteps = 16
+rotation_distance = 8
+position_min = -2
+position_max = 395
+homing_speed = 8
+homing_retract_dist = 10.0
+homing_retract_speed = 8
+second_homing_speed = 4
+use_sensorless_homing = False
+endstop_pin = ^PD3
+high_precision_step_compress = False
+position_endstop = 0.400
+
+[firmware_retraction]
+retract_length = 4.6
+retract_speed = 53
+unretract_extra_length = 0.00
+unretract_speed = 45
+z_hop_height = 0.6
+
+[gcode_macro _MAINTENANCE_CONFIG]
+variable_max_print_hours = 200
+gcode = 
+
+[gcode_macro _ALERT_CHECK]
+description = 
+gcode = 
+	{% set option = params.MODE|default(0)|int %}
+	{% set svv = printer.save_variables.variables %}
+	{% if option == 0 %}
+	{% if svv.maint_hr_counter == 0 %}
+	
+	{action_respond_info("MAINTENANCE TIMER HAS BEEN RESET TO %.2f HOURS."|format(svv.maint_hr_counter))}
+	{% else %}
+	
+	{action_respond_info("ERROR: UNABLE TO RESET MAINTENANCE TIMER.  Check your variables.cfg to make sure data is correct.")}
+	{% endif %}
+	{% elif option == 1 %}
+	{% if svv.maint_hr_counter > svv.maint_hr_max %}
+	
+	{action_respond_info("TIME FOR MAINTENANCE.  YOU HAVE %.2f PRINT HOURS."|format(svv.maint_hr_counter))}
+	{% endif %}
+	{% endif %}
+
+[gcode_macro MAINTENANCE_RESET]
+description = sets max hours and resets hour counter
+gcode = 
+	SAVE_VARIABLE VARIABLE=maint_hr_counter VALUE=0
+	SAVE_VARIABLE VARIABLE=maint_hr_max VALUE={printer["gcode_macro _MAINTENANCE_CONFIG"].max_print_hours}
+	_ALERT_CHECK
+
+[gcode_macro MAINTENANCE_TIME]
+description = displays current print hours since last maintenance
+gcode = 
+	{% set svv = printer.save_variables.variables %}
+	{action_respond_info("CURRENTLY HAVE %.2f HOURS SINCE LAST MAINTENANCE.  YOUR MAX HOURS IS: %.2f"|format(svv.maint_hr_counter, svv.maint_hr_max))}
+
+[gcode_macro _ADD_MAINTENANCE_TIMER]
+description = updates the hourcounter variable with the recently completed print.  call this in your print_end.
+gcode = 
+	{% set svv = printer.save_variables.variables %}
+	
+	{% set total_hours = ((printer.print_stats.total_duration/3600)|round(2,'common')) %}
+	
+	{% if total_hours > 0 %}
+	SAVE_VARIABLE VARIABLE=maint_hr_counter VALUE={svv.maint_hr_counter + total_hours}
+	
+	_ALERT_CHECK MODE=1
+	{% endif %}
+
+[safe_z_home]
+home_xy_position = 150,150
+speed = 120
+z_hop = 10
+z_hop_speed = 15
+move_to_previous = False
+
+[duplicate_pin_override]
+pins = PK5,
+
+[heater_bed]
+heater_pin = PH5
+sensor_type = EPCOS 100K B57560G104F
+sensor_pin = PK6
+control = pid
+pid_kp = 201.86
+pid_ki = 10.67
+pid_kd = 954.96
+min_temp = 0
+max_temp = 120
+
+[verify_heater heater_bed]
+max_error = 120
+check_gain_time = 90
+hysteresis = 5
+heating_gain = 2
+
+[z_thermal_adjust]
+temp_coeff = 0.0
+smooth_time = 2.0
+z_adjust_off_above = 99999999.0
+max_z_adjustment = 99999999.0
+sensor_type = EPCOS 100K B57560G104F
+sensor_pin = PK5
+min_temp = 0
+max_temp = 300
+
+[bed_screws]
+screw1 = 30,40
+screw1_name = front left screw
+screw2 = 270,40
+screw2_name = front right screw
+screw3 = 270,270
+screw3_name = rear right screw
+screw4 = 30,270
+screw4_name = rear left screw
+speed = 50
+horizontal_move_z = 7
+
+[gcode_macro BED_TRAMMING]
+gcode = 
+	M190 S72
+	M109 S220
+	_B28
+	G4 P2000
+	BED_SCREWS_ADJUST
+
+[gcode_macro PID_BED]
+gcode = 
+	PID_CALIBRATE HEATER=heater_bed TARGET=72
+
+[fan]
+pin = PH6
+
+[temperature_sensor rhino_linux]
+sensor_type = temperature_host
+min_temp = 10
+max_temp = 105
+
+[gcode_macro PART_COOLING_FAN_ON]
+gcode = 
+	M106 S255
+
+[gcode_macro PART_COOLING_FAN_OFF]
+gcode = 
+	M106 S0
+
+[gcode_macro _check_fan_params]
+gcode = 
+	{% set MAXIMUM = params.MAXIMUM|default(
+	printer["gcode_macro set_fan_scaling"].maximum)|int %}
+	{% set MINIMUM = params.MINIMUM|default(
+	printer["gcode_macro set_fan_scaling"].minimum)|int %}
+	
+	{% if params.SCALE and params.SCALE|float <= 0 %}
+	{ action_raise_error("SCALE must be a positive value.") }
+	{% elif MINIMUM < 0 or MINIMUM > 255 %}
+	{ action_raise_error("MINIMUM must be between 0 and 255.") }
+	{% elif MAXIMUM < 0 or MAXIMUM > 255 %}
+	{ action_raise_error("MAXIMUM must be between 0 and 255.") }
+	{% elif params.SPEED and (params.SPEED|int < 0 or params.SPEED|int > 255) %}
+	{ action_raise_error("SPEED must be between 0 and 255.") }
+	{% elif params.BOOST and (params.BOOST|int < 0 or params.BOOST|int > 255) %}
+	{ action_raise_error("BOOST must be between 0 and 255.") }
+	{% elif MINIMUM > MAXIMUM %}
+	{ action_raise_error("MINIMUM must be less than or equal to MAXIMUM.") }
+	{% endif %}
+
+[gcode_macro set_fan_scaling]
+description = Sets fan scaling factors applied to M106 command. If a speed is
+	provided it will be adjusted according to the scaling parameters.
+	Usage: SET_FAN_SCALING [SCALE=<scale>] [BOOST=<boost>] [MAXIMUM=<max>]
+	[MINIMUM=<min>] [SPEED=<speed>]
+variable_scale = 1.0
+variable_boost = 0
+variable_minimum = 0
+variable_maximum = 255
+variable_real_speed = 0
+gcode = 
+	_CHECK_FAN_PARAMS{% for k in params %}{' '~k~'='~params[k]}{% endfor %}
+	{% set SCALE = params.SCALE|default(scale)|float %}
+	{% set BOOST = params.BOOST|default(boost)|float %}
+	{% set MAXIMUM = params.MAXIMUM|default(maximum)|int %}
+	{% set MINIMUM = params.MINIMUM|default(minimum)|int %}
+	{% set SPEED = params.SPEED|default(real_speed)|int %}
+	
+	{% if SCALE != 1.0 or BOOST != 0 or MAXIMUM != 255 or MINIMUM != 0 %}
+	{action_respond_info("Fan: Scale: %.2f Minimum:%i Maximum: %i Speed: %i"|
+	format(SCALE, MINIMUM, MAXIMUM, SPEED))}
+	{% endif %}
+	
+	
+	{% if params|length > 0 %}
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=scale VALUE="{SCALE}"
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=boost VALUE="{BOOST}"
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=minimum VALUE="{MINIMUM}"
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=maximum VALUE="{MAXIMUM}"
+	
+	M106 S{SPEED}
+	{% endif %}
+	
+	{% set dummy = None if True else "
+	{% set dummy = params.SCALE|default(1.0)|float %}
+	{% set dummy = params.BUMP|default(0)|int %}
+	{% set dummy = params.MAXIMUM|default(255)|int %}
+	{% set dummy = params.MINIMUM|default(0)|int %}
+	{% set dummy = params.SPEED|default(current speed)|int %}
+	" %}
+
+[gcode_macro reset_fan_scaling]
+description = Clears all fan scaling factors.
+	Usage: RESET_FAN_SCALING
+gcode = 
+	SET_FAN_SCALING SCALE=1.0 BOOST=0 MAXIMUM=255 MINIMUM=0
+
+[gcode_macro m106]
+description = Wraps M106 to implement scaling overrides.
+rename_existing = M106.6245197
+gcode = 
+	{% set S = params.S|default(255)|int %}
+	{% set scale = printer["gcode_macro set_fan_scaling"] %}
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=real_speed VALUE="{S}"
+	M106.6245197 S{((((S + scale.boost) * scale.scale) | round | int,
+	scale.minimum) | max, scale.maximum) | min}
+
+[extruder]
+step_pin = PA4
+dir_pin = PA6
+enable_pin = !PA2
+microsteps = 128
+high_precision_step_compress = False
+rotation_distance = 60.92862336
+step_pulse_duration = 0.000002
+full_steps_per_rotation = 200
+heater_pin = PB4
+sensor_type = EPCOS 100K B57560G104F
+sensor_pin = PK5
+pressure_advance = 0.0495
+max_extrude_only_distance = 200.0
+nozzle_diameter = 0.400
+filament_diameter = 1.750
+heater_power = 40
+cooling_fan = fan
+control = mpc
+block_heat_capacity = 16.4775
+sensor_responsiveness = 0.0643333
+ambient_transfer = 0.0551994
+fan_ambient_transfer = 0.0551994, 0.0794723, 0.090845
+min_temp = 0
+max_temp = 300
+
+[input_shaper]
+shaper_freq_x = 39.8
+shaper_freq_y = 39.0
+shaper_type_x = ei
+shaper_type_y = 2hump_ei
+damping_ratio_x = 0.1
+damping_ratio_y = 0.1
+
+[gcode_macro TEST_SPEED]
+description = Test for max speed and acceleration parameters for the printer. Procedure: Home -> ReadPositionFromMCU -> MovesToolhead@Vel&Accel -> Home -> ReadPositionfromMCU
+gcode = 
+	
+	{% set speed  = params.SPEED|default(printer.configfile.settings.printer.max_velocity)|int %}
+	
+	{% set iterations = params.ITERATIONS|default(5)|int %}
+	
+	{% set accel  = params.ACCEL|default(printer.configfile.settings.printer.max_accel)|int %}
+	
+	{% set min_cruise_ratio = params.MIN_CRUISE_RATIO|default(0.5)|float %}
+	
+	{% set bound = params.BOUND|default(20)|int %}
+	
+	{% set smallpatternsize = SMALLPATTERNSIZE|default(20)|int %}
+	
+	
+	
+	{% set x_min = printer.toolhead.axis_minimum.x + bound %}
+	{% set x_max = printer.toolhead.axis_maximum.x - bound %}
+	{% set y_min = printer.toolhead.axis_minimum.y + bound %}
+	{% set y_max = printer.toolhead.axis_maximum.y - bound %}
+	
+	
+	
+	{% set x_center = (printer.toolhead.axis_minimum.x|float + printer.toolhead.axis_maximum.x|float ) / 2 %}
+	{% set y_center = (printer.toolhead.axis_minimum.y|float + printer.toolhead.axis_maximum.y|float ) / 2 %}
+	
+	
+	{% set x_center_min = x_center - (smallpatternsize/2) %}
+	{% set x_center_max = x_center + (smallpatternsize/2) %}
+	{% set y_center_min = y_center - (smallpatternsize/2) %}
+	{% set y_center_max = y_center + (smallpatternsize/2) %}
+	
+	
+	SAVE_GCODE_STATE NAME=TEST_SPEED
+	
+	
+	{ action_respond_info("TEST_SPEED: starting %d iterations at speed %d, accel %d" % (iterations, speed, accel)) }
+	
+	
+	M400
+	G28
+	
+	{% if printer.configfile.settings.quad_gantry_level %}
+	{% if printer.quad_gantry_level.applied == False %}
+	QUAD_GANTRY_LEVEL
+	G28 Z
+	{% endif %}
+	{% endif %}
+	
+	G90
+	G1 X{printer.toolhead.axis_maximum.x-50} Y{printer.toolhead.axis_maximum.y-50} F{30*60}
+	M400
+	G28 X Y
+	G0 X{printer.toolhead.axis_maximum.x-1} Y{printer.toolhead.axis_maximum.y-1} F{30*60}
+	G4 P1000
+	GET_POSITION
+	
+	
+	G0 X{x_min} Y{y_min} Z{bound + 10} F{speed*60}
+	
+	
+	{% if printer.configfile.settings.printer.minimum_cruise_ratio is defined %}
+	SET_VELOCITY_LIMIT VELOCITY={speed} ACCEL={accel} MINIMUM_CRUISE_RATIO={min_cruise_ratio}
+	{% else %}
+	SET_VELOCITY_LIMIT VELOCITY={speed} ACCEL={accel} ACCEL_TO_DECEL={accel / 2}
+	{% endif %}
+	
+	{% for i in range(iterations) %}
+	
+	G0 X{x_min} Y{y_min} F{speed*60}
+	G0 X{x_max} Y{y_max} F{speed*60}
+	G0 X{x_min} Y{y_min} F{speed*60}
+	G0 X{x_max} Y{y_min} F{speed*60}
+	G0 X{x_min} Y{y_max} F{speed*60}
+	G0 X{x_max} Y{y_min} F{speed*60}
+	
+	
+	G0 X{x_min} Y{y_min} F{speed*60}
+	G0 X{x_min} Y{y_max} F{speed*60}
+	G0 X{x_max} Y{y_max} F{speed*60}
+	G0 X{x_max} Y{y_min} F{speed*60}
+	
+	
+	G0 X{x_center_min} Y{y_center_min} F{speed*60}
+	G0 X{x_center_max} Y{y_center_max} F{speed*60}
+	G0 X{x_center_min} Y{y_center_min} F{speed*60}
+	G0 X{x_center_max} Y{y_center_min} F{speed*60}
+	G0 X{x_center_min} Y{y_center_max} F{speed*60}
+	G0 X{x_center_max} Y{y_center_min} F{speed*60}
+	
+	
+	G0 X{x_center_min} Y{y_center_min} F{speed*60}
+	G0 X{x_center_min} Y{y_center_max} F{speed*60}
+	G0 X{x_center_max} Y{y_center_max} F{speed*60}
+	G0 X{x_center_max} Y{y_center_min} F{speed*60}
+	{% endfor %}
+	
+	
+	{% if printer.configfile.settings.printer.minimum_cruise_ratio is defined %}
+	SET_VELOCITY_LIMIT VELOCITY={printer.configfile.settings.printer.max_velocity} ACCEL={printer.configfile.settings.printer.max_accel} MINIMUM_CRUISE_RATIO={printer.configfile.settings.printer.minimum_cruise_ratio}
+	{% else %}
+	SET_VELOCITY_LIMIT VELOCITY={printer.configfile.settings.printer.max_velocity} ACCEL={printer.configfile.settings.printer.max_accel} ACCEL_TO_DECEL={printer.configfile.settings.printer.max_accel_to_decel}
+	{% endif %}
+	
+	
+	M400
+	G28
+	
+	G90
+	G0 X{printer.toolhead.axis_maximum.x-1} Y{printer.toolhead.axis_maximum.y-1} F{30*60}
+	G4 P1000
+	GET_POSITION
+	
+	
+	RESTORE_GCODE_STATE NAME=TEST_SPEED
+
+[mcu]
+serial = /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+baud = 250000
+
+[printer]
+kinematics = cartesian
+max_velocity = 238
+max_accel = 11500
+max_z_velocity = 17
+max_z_accel = 700
+square_corner_velocity = 10.0
+minimum_cruise_ratio = 0.5
+
+[save_variables]
+filename = ~/ben10_data/config/variables.cfg
+
+[endstop_phase]
+
+[force_move]
+enable_force_move = True
+
+[exclude_object]
+enable_exclude_object = True
+
+[gcode_arcs]
+resolution = 0.1
+
+[danger_options]
+error_on_unused_config_options = True
+allow_plugin_override = True
+multi_mcu_trsync_timeout = 0.025
+homing_elapsed_distance_tolerance = 0.5
+autosave_includes = True
+bgflush_extra_time = 0.250
+log_statistics = True
+log_config_file_at_startup = True
+log_bed_mesh_at_startup = True
+log_shutdown_info = True
+log_serial_reader_warnings = True
+log_startup_info = True
+log_webhook_method_register_messages = False
+=======================
+Loaded MCU 'mcu' 119 commands (Kalico v0.12.0-675-ga2f3b10c / gcc: (GCC) 14.2.0 binutils: (GNU Binutils) 2.43.1)
+MCU 'mcu' config: ADC_MAX=1023 BUS_PINS_spi=PB3,PB2,PB1 BUS_PINS_twi=PD0,PD1 CLOCK_FREQ=16000000 MCU=atmega2560 PWM_MAX=255 RECEIVE_WINDOW=192 RESERVE_PINS_serial=PE0,PE1 SERIAL_BAUD=250000 STATS_SUMSQ_BASE=256
+Configured MCU 'mcu' (278 moves)
+Args: ['/home/octo/klipper/klippy/klippy.py', '/home/octo/ben10_data/config/printer.cfg', '-I', '/home/octo/ben10_data/comms/klippy.serial', '-l', '/home/octo/ben10_data/logs/klippy.log', '-a', '/home/octo/ben10_data/comms/klippy.sock']
+App Name: Kalico
+Git version: 'v0.12.0-696-g9eac41f9'
+Branch: bleeding-edge-v2
+Remote: origin
+Tracked URL: https://github.com/KalicoCrew/kalico
+CPU: 8 core Intel(R) Core(TM) i7-7820HK CPU @ 2.90GHz
+Python: '3.13.3 (main, Apr  8 2025, 19:55:40) [GCC 14.2.0]'
+webhooks client 129765567172640: {'program': 'Moonraker', 'version': 'v0.9.3-74-g1c12414'}
+=============== Log rollover at Sat May  3 02:59:43 2025 ===============
+Running Command {update_git_script}...:
+[Lock] Acquired lock: /home/octo/config_backup/.script.lock
+
+[K[1;92m●[0m Checking for installed dependencies [1;92mDone![0m
+
+
+Klipper-Backup is up to date
+
+
+Branch: devel-ben10 in .env does not match the currently checked out branch of: devel-able.
+
+Switched to a new branch 'devel-ben10'
+
+Skipping symbolic link: ben10_data/config/KAMP
+
+[devel-ben10 17916a1] KAMP_Settings.cfg bed.cfg btt_lis2dw.cfg display.cfg fans.cfg includes.cfg macros.cfg mainsail.cfg maintenance.cfg moonraker.conf octoapp-system.cfg octoapp.conf octoeverywhere-system.cfg octoeverywhere.conf printer.cfg retraction.cfg runout.cfg sensorless.cfg shell_command.cfg speed_test.cfg steppers_drivers.cfg timelapse.cfg tool_head.cfg variables.cfg zerog_purge.cfg
+ 31 files changed, 566 insertions(+), 1230 deletions(-)
+ delete mode 100755 able_data/config/bed.cfg
+ delete mode 100755 able_data/config/display.cfg
+ delete mode 100755 able_data/config/sensorless.cfg
+ delete mode 100755 able_data/config/shell_command.cfg
+ delete mode 100755 able_data/config/steppers_drivers.cfg
+ delete mode 100755 able_data/config/tool_head.cfg
+ delete mode 100755 able_data/config/variables.cfg
+ delete mode 100755 able_data/config/zerog_purge.cfg
+ rename {able_data => ben10_data}/config/KAMP_Settings.cfg (86%)
+ create mode 100755 ben10_data/config/bed.cfg
+ rename {able_data => ben10_data}/config/btt_lis2dw.cfg (97%)
+ create mode 100755 ben10_data/config/display.cfg
+ rename able_data/config/fans.cfg => ben10_data/config/fan.cfg (83%)
+ rename {able_data => ben10_data}/config/includes.cfg (62%)
+ rename {able_data => ben10_data}/config/macros.cfg (85%)
+ rename {able_data => ben10_data}/config/mainsail.cfg (100%)
+ rename {able_data => ben10_data}/config/maintenance.cfg (100%)
+ rename {able_data => ben10_data}/config/moonraker.conf (71%)
+ rename {able_data => ben10_data}/config/octoapp-system.cfg (90%)
+ rename {able_data => ben10_data}/config/octoapp.conf (69%)
+ rename {able_data => ben10_data}/config/octoeverywhere-system.cfg (93%)
+ rename {able_data => ben10_data}/config/octoeverywhere.conf (96%)
+ rename {able_data => ben10_data}/config/printer.cfg (80%)
+ rename {able_data => ben10_data}/config/retraction.cfg (80%)
+ rename {able_data => ben10_data}/config/runout.cfg (99%)
+ create mode 100755 ben10_data/config/shell_command.cfg
+ rename {able_data => ben10_data}/config/speed_test.cfg (100%)
+ create mode 100755 ben10_data/config/stepper.cfg
+ rename {able_data => ben10_data}/config/timelapse.cfg (100%)
+ create mode 100755 ben10_data/config/tool_head.cfg
+ create mode 100755 ben10_data/config/variables.cfg
+
+From https://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@github.com/Bradford1040/BEN10.git
+
+remote: 
+remote: Create a pull request for 'devel-ben10' on GitHub by visiting:        
+remote:      https://github.com/Bradford1040/BEN10/pull/new/devel-ben10        
+remote: 
+
+To https://github.com/Bradford1040/BEN10.git
+ * [new branch]      devel-ben10 -> devel-ben10
+
+branch 'devel-ben10' set up to track 'origin/devel-ben10'.
+
+Command {update_git_script} finished
+
+webhooks client 129765567172640: Disconnected
+webhooks client 129765567173696: New connection
+webhooks client 129765567173696: Client info {'program': 'Moonraker', 'version': 'v0.9.3-74-g1c12414'}
+=======================
+Starting Klippy...
+Args: ['/home/octo/klipper/klippy/klippy.py', '/home/octo/ben10_data/config/printer.cfg', '-I', '/home/octo/ben10_data/comms/klippy.serial', '-l', '/home/octo/ben10_data/logs/klippy.log', '-a', '/home/octo/ben10_data/comms/klippy.sock']
+App Name: Kalico
+Git version: 'v0.12.0-696-g9eac41f9'
+Branch: bleeding-edge-v2
+Remote: origin
+Tracked URL: https://github.com/KalicoCrew/kalico
+CPU: 8 core Intel(R) Core(TM) i7-7820HK CPU @ 2.90GHz
+Python: '3.13.3 (main, Apr  8 2025, 19:55:40) [GCC 14.2.0]'
+Start printer at Sat May  3 04:28:44 2025 (1746260925.0 136997.3)
+===== Config file =====
+[gcode_shell_command update_git_script]
+command = bash /home/octo/ben10_data/klipper-backup/script.sh
+timeout = 90.0
+verbose = True
+
+[virtual_sdcard]
+path = /home/octo/ben10_data/gcodes
+on_error_gcode = CANCEL_PRINT
+
+[pause_resume]
+recover_velocity = 70
+
+[display_status]
+
+[respond]
+default_type = echo
+default_prefix = echo:
+enable_respond = True
+
+[gcode_macro CANCEL_PRINT]
+description = Cancel the actual running print
+rename_existing = BASE_CANCEL_PRINT
+gcode = 
+	TURN_OFF_HEATERS
+	CLEAR_PAUSE
+	SDCARD_RESET_FILE
+	BASE_CANCEL_PRINT
+	G91
+	G1 E-5 F2100
+	G1 Z10
+	G90
+	G1 X300 Y300 F6000
+
+[gcode_macro PAUSE]
+description = Pause the actual running print
+rename_existing = BASE_PAUSE
+gcode = 
+	SAVE_GCODE_STATE NAME=PAUSE_state
+	BASE_PAUSE
+	G91
+	G1 E-2 F2100
+	G1 Z10
+	G90
+	G1 X5 Y5 F4000
+
+[gcode_macro RESUME]
+description = Resume the actual running print
+rename_existing = BASE_RESUME
+variable_last_extruder_temp = {'restore': False, 'temp': 0}
+variable_restore_idle_timeout = 0
+variable_idle_state = False
+gcode = 
+	G91
+	G1 E1.1 F2100
+	G90
+	RESTORE_GCODE_STATE NAME=PAUSE_state MOVE=1
+	BASE_RESUME
+
+[gcode_macro SET_PAUSE_NEXT_LAYER]
+description = Enable a pause if the next layer is reached
+gcode = 
+	{% set pause_next_layer = printer['gcode_macro SET_PRINT_STATS_INFO'].pause_next_layer %}
+	{% set ENABLE = params.ENABLE|default(1)|int != 0 %}
+	{% set MACRO = params.MACRO|default(pause_next_layer.call, True) %}
+	SET_GCODE_VARIABLE MACRO=SET_PRINT_STATS_INFO VARIABLE=pause_next_layer VALUE="{{ 'enable': ENABLE, 'call': MACRO }}"
+
+[gcode_macro SET_PAUSE_AT_LAYER]
+description = Enable/disable a pause if a given layer number is reached
+gcode = 
+	{% set pause_at_layer = printer['gcode_macro SET_PRINT_STATS_INFO'].pause_at_layer %}
+	{% set ENABLE = params.ENABLE|int != 0 if params.ENABLE is defined
+	else params.LAYER is defined %}
+	{% set LAYER = params.LAYER|default(pause_at_layer.layer)|int %}
+	{% set MACRO = params.MACRO|default(pause_at_layer.call, True) %}
+	SET_GCODE_VARIABLE MACRO=SET_PRINT_STATS_INFO VARIABLE=pause_at_layer VALUE="{{ 'enable': ENABLE, 'layer': LAYER, 'call': MACRO }}"
+
+[gcode_macro SET_PRINT_STATS_INFO]
+rename_existing = SET_PRINT_STATS_INFO_BASE
+description = Overwrite, to get pause_next_layer and pause_at_layer feature
+variable_pause_next_layer = { 'enable': False, 'call': "PAUSE" }
+variable_pause_at_layer = { 'enable': False, 'layer': 0, 'call': "PAUSE" }
+gcode = 
+	{% if pause_next_layer.enable %}
+	RESPOND TYPE=echo MSG='{"%s, forced by pause_next_layer" % pause_next_layer.call}'
+	{pause_next_layer.call}
+	SET_PAUSE_NEXT_LAYER ENABLE=0
+	{% elif pause_at_layer.enable and params.CURRENT_LAYER is defined and params.CURRENT_LAYER|int == pause_at_layer.layer %}
+	RESPOND TYPE=echo MSG='{"%s, forced by pause_at_layer [%d]" % (pause_at_layer.call, pause_at_layer.layer)}'
+	{pause_at_layer.call}
+	SET_PAUSE_AT_LAYER ENABLE=0
+	{% endif %}
+	SET_PRINT_STATS_INFO_BASE {rawparams}
+
+[gcode_macro _TOOLHEAD_PARK_PAUSE_CANCEL]
+description = Helper: park toolhead used in PAUSE and CANCEL_PRINT
+gcode = 
+	
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE']|default({}) %}
+	{% set velocity = printer.configfile.settings.pause_resume.recover_velocity %}
+	{% set use_custom     = client.use_custom_pos|default(false)|lower == 'true' %}
+	{% set custom_park_x  = client.custom_park_x|default(0.0) %}
+	{% set custom_park_y  = client.custom_park_y|default(0.0) %}
+	{% set park_dz        = client.custom_park_dz|default(2.0)|abs %}
+	{% set sp_hop         = client.speed_hop|default(15) * 60 %}
+	{% set sp_move        = client.speed_move|default(velocity) * 60 %}
+	
+	{% set origin    = printer.gcode_move.homing_origin %}
+	{% set act       = printer.gcode_move.gcode_position %}
+	{% set max       = printer.toolhead.axis_maximum %}
+	{% set cone      = printer.toolhead.cone_start_z|default(max.z) %}
+	{% set round_bed = True if printer.configfile.settings.printer.kinematics is in ['delta','polar','rotary_delta','winch']
+	else False %}
+	
+	{% set z_min = params.Z_MIN|default(0)|float %}
+	{% set z_park = [[(act.z + park_dz), z_min]|max, (max.z - origin.z)]|min %}
+	{% set x_park = params.X       if params.X is defined
+	else custom_park_x  if use_custom
+	else 0.0            if round_bed
+	else (max.x - 5.0) %}
+	{% set y_park = params.Y       if params.Y is defined
+	else custom_park_y  if use_custom
+	else (max.y - 5.0)  if round_bed and z_park < cone
+	else 0.0            if round_bed
+	else (max.y - 5.0) %}
+	
+	_CLIENT_RETRACT
+	{% if "xyz" in printer.toolhead.homed_axes %}
+	G90
+	G1 Z{z_park} F{sp_hop}
+	G1 X{x_park} Y{y_park} F{sp_move}
+	{% if not printer.gcode_move.absolute_coordinates %} G91 {% endif %}
+	{% else %}
+	RESPOND TYPE=echo MSG='Printer not homed'
+	{% endif %}
+
+[gcode_macro _CLIENT_EXTRUDE]
+description = Extrudes, if the extruder is hot enough
+gcode = 
+	
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE']|default({}) %}
+	{% set use_fw_retract = (client.use_fw_retract|default(false)|lower == 'true') and (printer.firmware_retraction is defined) %}
+	{% set length = params.LENGTH|default(client.unretract)|default(1.0)|float %}
+	{% set speed = params.SPEED|default(client.speed_unretract)|default(35) %}
+	{% set absolute_extrude = printer.gcode_move.absolute_extrude %}
+	
+	{% if printer.toolhead.extruder != '' %}
+	{% if printer[printer.toolhead.extruder].can_extrude %}
+	{% if use_fw_retract %}
+	{% if length < 0 %}
+	G10
+	{% else %}
+	G11
+	{% endif %}
+	{% else %}
+	M83
+	G1 E{length} F{(speed|float|abs) * 60}
+	{% if absolute_extrude %}
+	M82
+	{% endif %}
+	{% endif %}
+	{% else %}
+	RESPOND TYPE=echo MSG='{"\"%s\" not hot enough" % printer.toolhead.extruder}'
+	{% endif %}
+	{% endif %}
+
+[gcode_macro _CLIENT_RETRACT]
+description = Retracts, if the extruder is hot enough
+gcode = 
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE']|default({}) %}
+	{% set length = params.LENGTH|default(client.retract)|default(1.0)|float %}
+	{% set speed = params.SPEED|default(client.speed_retract)|default(35) %}
+	
+	_CLIENT_EXTRUDE LENGTH=-{length|float|abs} SPEED={speed|float|abs}
+
+[gcode_macro _CLIENT_LINEAR_MOVE]
+description = Linear move with save and restore of the gcode state
+gcode = 
+	{% set x_move = "X" ~ params.X if params.X is defined else "" %}
+	{% set y_move = "Y" ~ params.Y if params.Y is defined else "" %}
+	{% set z_move = "Z" ~ params.Z if params.Z is defined else "" %}
+	{% set e_move = "E" ~ params.E if params.E is defined else "" %}
+	{% set rate = "F" ~ params.F if params.F is defined else "" %}
+	{% set ABSOLUTE = params.ABSOLUTE | default(0) | int != 0 %}
+	{% set ABSOLUTE_E = params.ABSOLUTE_E | default(0) | int != 0 %}
+	SAVE_GCODE_STATE NAME=_client_movement
+	{% if x_move or y_move or z_move %}
+	G9{ 0 if ABSOLUTE else 1 }
+	{% endif %}
+	{% if e_move %}
+	M8{ 2 if ABSOLUTE_E else 3 }
+	{% endif %}
+	G1 { x_move } { y_move } { z_move } { e_move } { rate }
+	RESTORE_GCODE_STATE NAME=_client_movement
+
+[gcode_macro _CLIENT_VARIABLE]
+gcode = 
+	variable_use_custom_pos   : True
+	variable_custom_park_x    : 300.0
+	variable_custom_park_y    : 300.0
+	variable_custom_park_dz   : 10.0
+	variable_retract          : 2.0
+	variable_cancel_retract   : 2.0
+	variable_speed_retract    : 85.0
+	variable_unretract        : 1.0
+	variable_speed_unretract  : 45.0
+	variable_speed_hop        : 15.0
+	variable_speed_move       : 100.0
+	variable_park_at_cancel   : True
+	variable_park_at_cancel_x : True
+	variable_park_at_cancel_y : True
+	
+	variable_use_fw_retract   : True
+	variable_idle_timeout     : 7800
+
+[gcode_macro BACK_UP_GITHUB]
+gcode = 
+	RUN_SHELL_COMMAND CMD=update_git_script
+
+[gcode_macro FAKE_POSITION]
+gcode = 
+	SET_KINEMATIC_POSITION X=10 Y=10 Z=10
+
+[gcode_macro CALIBRATE_HOME]
+gcode = 
+	M190 S72
+	M109 S220
+	M400
+	_B28
+	Z_ENDSTOP_CALIBRATE
+
+[gcode_macro _B28]
+gcode = 
+	{% if "xyz" not in printer.toolhead.homed_axes %}
+	G28
+	{% endif %}
+
+[gcode_macro PERCISE_HOME]
+gcode = 
+	G28
+
+[gcode_macro G28]
+rename_existing = G28.8888888888
+gcode = 
+	FAKE_POSITION
+	G4 P4000
+	G1 Z20
+	G4 P2000
+	M117 Homing
+	G90
+	G28.8888888888 Y
+	G1 Y5 F1800
+	G4 P2000
+	G28.8888888888 X
+	G1 X5 F1800
+	G4 P2000
+	G28.8888888888 Z
+	M117 Homed
+
+[gcode_macro PRIME_EXTRUDER]
+gcode = 
+	
+	M117 Priming Line
+	G92 E0
+	G1 X5.1 Y20 Z0.5 F3000
+	G1 X5.1 Y200 Z0.28 F1800.0 E35; Draw the first line
+	G92 E0
+	G1 X5.4 Y200 Z0.28 F5000.0; Move to the side a little
+	G1 X5.4 Y20.0 Z0.28 F1800.0 E25; Draw the second line
+	G92 E0
+	G1 F2400 E-1.5
+	G92 E0
+	G1 Z2.0 F3000
+	SMART_PARK
+	M117 Away We Go
+
+[gcode_macro START_PRINT]
+gcode = 
+	_SET_MPC_MATERIAL MATERIAL={params.MATERIAL}
+	{% set BED_TEMP = params.BED_TEMP|default(70) | float %}
+	{% set EXTRUDER_TEMP = params.EXTRUDER_TEMP|default(170) | float %}
+	
+	
+	
+	M117 PRE-Heating bed
+	M140 S{BED_TEMP}
+	
+	M117 PRE-Heating nozzle
+	M104 S170
+	
+	G90
+	M73
+	
+	SET_GCODE_OFFSET Z=0.0
+	
+	_B28
+	
+	G1 Z5 F3000
+	
+	G1 Z0.45 F300
+	
+	M190 S{BED_TEMP}
+	
+	M109 S{EXTRUDER_TEMP}
+	
+	PRIME_EXTRUDER
+
+[gcode_macro END_PRINT]
+gcode = 
+	G91
+	G1 E-2 Z20 F2700
+	G90
+	G1 X300 Y300 F9000
+	M104 S0
+	M140 S0
+	M107
+	M84
+	M221 S100
+	M220 S100
+	_ADD_MAINTENANCE_TIMER
+	M117 Print Complete
+
+[gcode_macro m201]
+description = Sets maximum accelleration.
+	Usage: M201 [X<accel>] [Y<accel>]
+variable_max_accel = 1.7976931348623157e+308
+gcode = 
+	{% set km = printer["gcode_macro _km_globals"] %}
+	{% if 'X' in params or 'Y' in params %}
+	{% set accel = (params.X|default(params.Y)|float,
+	params.Y|default(params.X)|float)|min %}
+	SET_GCODE_VARIABLE MACRO=m201 VARIABLE=max_accel VALUE="{accel}"
+	{% else %}
+	SET_VELOCITY_LIMIT
+	{% endif %}
+
+[gcode_macro m203]
+description = Sets maximum velocity.
+	Usage: M203 [X<velocity>] [Y<velocity>]
+gcode = 
+	{% if 'X' in params or 'Y' in params %}
+	{% set velocity = (params.X|default(params.Y)|float,
+	params.Y|default(params.X)|float)|min %}
+	SET_VELOCITY_LIMIT VELOCITY="{velocity}"
+	{% else %}
+	SET_VELOCITY_LIMIT
+	{% endif %}
+
+[gcode_macro m205]
+description = Sets square corner velocity.
+	Usage: M203 [X<velocity>] [Y<velocity>]
+gcode = 
+	{% if 'X' in params or 'Y' in params %}
+	SET_VELOCITY_LIMIT SQUARE_CORNER_VELOCITY="{
+	(params.X|default(0)|float, params.Y|default(0)|float)|min}"
+	{% else %}
+	SET_VELOCITY_LIMIT
+	{% endif %}
+
+[gcode_macro m900]
+description = Sets pressure advance.
+	Usage: M900 [K<advance>] [T<extruder_index>]
+gcode = 
+	{% set km = printer["gcode_macro _km_globals"] %}
+	{% if km.pressure_advance_scale > 0.0 %}
+	{% set extruder = "extruder" ~ params.T|replace('0', '')
+	if "T" in params else printer.toolhead.extruder %}
+	{% if 'K' in params %}
+	SET_PRESSURE_ADVANCE EXTRUDER="{extruder}" ADVANCE="{
+	params.K|float * km.pressure_advance_scale}"
+	{% endif %}
+	{% endif %}
+
+[gcode_macro _reset_velocity_limits]
+description = Sets maximum accelleration.
+	Usage: M204 [S<accel>] [P<accel> T<accel>]
+gcode = 
+	SET_GCODE_VARIABLE MACRO=m201 VARIABLE=max_accel VALUE="{1.7976931348623157e+308}"
+
+[gcode_macro m300]
+description = Emits and audible beep.
+	Usage: M300 [P<duration>] [S<frequency>]
+gcode = 
+	{% set settings = printer.configfile.settings %}
+	{% if "output_pin beeper" in printer %}
+	{% set P = (params.P|default(100)|int, 0)|max %}
+	{% set S = (params.S|default(1000)|int, 1)|max %}
+	SET_PIN PIN=beeper VALUE={% if settings["output_pin beeper"].pwm %}{
+	settings["output_pin beeper"].scale|default(1.0) * 0.5
+	} CYCLE_TIME={ 1.0 / S }{% else %}1{% endif %}
+	G4 P{P}
+	SET_PIN PIN=beeper VALUE=0
+	{% else %}
+	{action_respond_info(
+	"M300 is disabled. To enable create an [output_pin beeper] config.")}
+	{% endif %}
+
+[gcode_macro _SET_MPC_MATERIAL]
+description = Set heater MPC parameters for a given material
+variable_filament_table = 
+	
+	{
+	
+	"PLA"       : ( 1.25, 2.00 ),
+	"PETG"      : ( 1.27, 1.93 ),
+	"PC+ABS"    : ( 1.15, 2.20 ),
+	"ABS"       : ( 1.06, 2.40 ),
+	"ASA"       : ( 1.10, 2.10 ),
+	"PA6"       : ( 1.12, 2.50 ),
+	"PA"        : ( 1.15, 2.50 ),
+	"PC"        : ( 1.20, 1.90 ),
+	"TPU"       : ( 1.21, 1.70 ),
+	"TPU-90A"   : ( 1.15, 2.00 ),
+	"TPU-95A"   : ( 1.22, 2.00 ),
+	"ABS-CF"    : ( 1.11, 2.40 ),
+	"ASA-CF"    : ( 1.11, 2.10 ),
+	"PA6-CF"    : ( 1.19, 2.50 ),
+	"PC+ABS-CF" : ( 1.22, 2.20 ),
+	"PC+CF"     : ( 1.36, 1.90 ),
+	"PLA-CF"    : ( 1.29, 2.20 ),
+	"PETG-CF"   : ( 1.30, 2.20 ),
+	}
+gcode = 
+	{% set material = params.MATERIAL | upper %}
+	{% set heater = params.HEATER | default('extruder') %}
+	{% set extruder_config = printer.configfile.settings[heater] %}
+	
+	{% if material in filament_table %}
+	{% set (density, heat_capacity) = filament_table[material] %}
+	
+	RESPOND PREFIX=🔥 MSG="Configured {heater} MPC for {material}. Density: {density}, Heat Capacity: {heat_capacity}"
+	{% else %}
+	{% set density = extruder_config.filament_density %}
+	{% set heat_capacity=extruder_config.filament_heat_capacity %}
+	
+	RESPOND PREFIX=🔥 MSG="Unknown material '{material}', using default mpc parameters for {heater}"
+	{% endif %}
+	
+	MPC_SET HEATER={heater} FILAMENT_DENSITY={density} FILAMENT_HEAT_CAPACITY={heat_capacity}
+
+[gcode_macro SET_ACTIVE_SPOOL]
+gcode = 
+	{% if params.ID %}
+	{% set id = params.ID|int %}
+	{action_call_remote_method(
+	"spoolman_set_active_spool",
+	spool_id=id
+	)}
+	{% else %}
+	{action_respond_info("Parameter 'ID' is required")}
+	{% endif %}
+
+[gcode_macro CLEAR_ACTIVE_SPOOL]
+gcode = 
+	{action_call_remote_method(
+	"spoolman_set_active_spool",
+	spool_id=None
+	)}
+
+[gcode_macro SMART_PARK]
+description = Parks your printhead near the print area for pre-print hotend heating.
+gcode = 
+	
+	{% set kamp_settings = printer["gcode_macro _KAMP_Settings"] %}
+	{% set z_height = kamp_settings.smart_park_height | float %}
+	{% set purge_margin = kamp_settings.purge_margin | float %}
+	{% set verbose_enable = kamp_settings.verbose_enable | abs %}
+	{% set center_x = printer.toolhead.axis_maximum.x / 2 | float %}
+	{% set center_y = printer.toolhead.axis_maximum.y / 2 | float %}
+	{% set axis_minimum_x = printer.toolhead.axis_minimum.x | float %}
+	{% set axis_minimum_y = printer.toolhead.axis_minimum.y | float %}
+	{% set all_points = printer.exclude_object.objects | map(attribute='polygon') | sum(start=[]) %}
+	{% set x_min = all_points | map(attribute=0) | min | default(center_x) %}
+	{% set y_min = all_points | map(attribute=1) | min | default(center_y) %}
+	{% set travel_speed = (printer.toolhead.max_velocity) * 60 | float %}
+	
+	{% if purge_margin > 0 and x_min != center_x and y_min != center_y %}
+	{% set x_min = [ x_min - purge_margin , x_min ] | min %}
+	{% set y_min = [ y_min - purge_margin , y_min ] | min %}
+	{% set x_min = [ x_min , axis_minimum_x ] | max %}
+	{% set y_min = [ y_min , axis_minimum_y ] | max %}
+	{% endif %}
+	
+	
+	{% if verbose_enable == True %}
+	
+	{ action_respond_info("Smart Park location: {},{}.".format(
+	(x_min),
+	(y_min),
+	)) }
+	
+	{% endif %}
+	
+	SAVE_GCODE_STATE NAME=Presmartpark_State
+	
+	G90
+	{% if printer.toolhead.position.z < z_height %}
+	G0 Z{z_height}
+	{% endif %}
+	G0 X{x_min} Y{y_min} F3000
+	G0 Z{z_height}
+	
+	RESTORE_GCODE_STATE NAME=Presmartpark_State
+
+[gcode_macro _KAMP_Settings]
+description = This macro contains all adjustable settings for KAMP
+variable_verbose_enable = True
+variable_mesh_margin = 15
+variable_fuzz_amount = 0
+variable_probe_dock_enable = False
+variable_attach_macro = 'Attach_Probe'
+variable_detach_macro = 'Dock_Probe'
+variable_purge_height = 0.8
+variable_tip_distance = 0
+variable_purge_margin = 10
+variable_purge_amount = 30
+variable_flow_rate = 12
+variable_smart_park_height = 10
+gcode = 
+	
+	{action_respond_info(" Running the KAMP_Settings macro does nothing, it is only used for storing KAMP settings. ")}
+
+[filament_switch_sensor runout_sensor]
+pause_on_runout = False
+runout_gcode = M600
+runout_distance = 10.0
+event_delay = 3.0
+switch_pin = PE4
+smart = True
+always_fire_events = False
+check_on_print_start = True
+
+[gcode_macro M600]
+gcode = 
+	
+	
+	
+	
+	
+	
+	SAVE_GCODE_STATE NAME=M600_state
+	PAUSE
+	
+	
+	
+	
+	
+	
+	
+	
+	UNLOAD_FILAMENT
+	SET_FILAMENT_SENSOR SENSOR=runout_sensor ENABLE=0
+
+[gcode_macro SWAP_RESUME]
+gcode = 
+	LOAD_FILAMENT
+	RESTORE_GCODE_STATE NAME=M600_state
+	SET_FILAMENT_SENSOR SENSOR=runout_sensor ENABLE=1
+	resume
+
+[idle_timeout]
+timeout = 600
+gcode = 
+	M117 Timeout reached
+	{% if printer.pause_resume.is_paused %}
+	SET_IDLE_TIMEOUT TIMEOUT=7800
+	{% else %}
+	M84
+	SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0
+	STATUS
+	M117 Need Re-Home
+	{% endif %}
+
+[gcode_macro UNLOAD_FILAMENT]
+gcode = 
+	{% set length = params.LENGTH|default(100)|float %}
+	{% set target = params.TARGET|default(240)|float %}
+	
+	{% set cur_temp = printer.extruder.temperature|float %}
+	{% set min_temp = printer.configfile.settings.extruder.min_extrude_temp|int %}
+	{% if not printer.extruder.can_extrude %}
+	RESPOND TYPE=error MSG="Below minimum temp. Heating extruder..."
+	M109 S{min_temp|int}
+	{% endif %}
+	{% if params.TARGET is defined %}
+	{% if cur_temp|float < target|float or min_temp|int < target|int %}
+	M109 S{target}
+	M117 Heating nozzle...
+	{% endif %}
+	{% endif %}
+	
+	G92 E0
+	G1 E7.0 F1200
+	G1 E2.0 F1600
+	G4 P300
+	G92 E0
+	G1 E-10.0 F4000
+	G92 E0
+	G4 P600
+	G1 E-{length} F3000
+	G92 E0
+	CLEAR_ACTIVE_SPOOL
+
+[gcode_macro LOAD_FILAMENT]
+gcode = 
+	{% set slow = params.SLOW|default(20)|float %}
+	{% set fast = params.FAST|default(40)|float %}
+	
+	{% set target = params.TARGET|default(220)|float %}
+	{% set cur_temp = printer.extruder.temperature|float %}
+	{% set min_temp = printer.configfile.settings.extruder.min_extrude_temp|int %}
+	{% if not printer.extruder.can_extrude %}
+	RESPOND TYPE=error MSG="Below minimum temp. Heating extruder..."
+	M109 S{min_temp|int}
+	{% endif %}
+	{% if params.TARGET is defined %}
+	{% if cur_temp|float < target|float or min_temp|int < target|float %}
+	M109 S{target}
+	M117 Heating nozzle...
+	{% endif %}
+	{% endif %}
+	M117  LOADING...
+	G92 E0
+	G4 P5000
+	G1 E15.0 F1000
+	G1 E{fast} F1200
+	G4 P900
+	G92 E0
+	G1 E{slow} F450
+	G92 E0
+	SET_IDLE_TIMEOUT TIMEOUT=600
+
+[gcode_macro PURGE]
+gcode = 
+	{% set LENGTH = params.LENGTH|default(45)|float %}
+	
+	{% set target = params.TARGET|default(220)|float %}
+	{% set cur_temp = printer.extruder.temperature|float %}
+	{% set min_temp = printer.configfile.settings.extruder.min_extrude_temp|int %}
+	{% if not printer.extruder.can_extrude %}
+	RESPOND TYPE=error MSG="Below minimum temp. Heating extruder..."
+	M109 S{min_temp|int}
+	{% endif %}
+	{% if params.TARGET is defined %}
+	{% if cur_temp|float < target|float or min_temp|int < target|float %}
+	M109 S{target}
+	M117 Heating nozzle...
+	{% endif %}
+	{% endif %}
+	M117 PURGING..
+	G91
+	G1 E{LENGTH} F250
+	G90
+
+[stepper_x]
+step_pin = PF0
+dir_pin = PF1
+enable_pin = !PD7
+microsteps = 16
+rotation_distance = 40
+endstop_pin = ^PE5
+position_endstop = 0
+position_min = 0
+position_max = 305
+homing_speed = 50
+homing_retract_dist = 10.0
+homing_retract_speed = 8
+second_homing_speed = 8
+use_sensorless_homing = False
+high_precision_step_compress = False
+
+[stepper_y]
+step_pin = PF6
+dir_pin = PF7
+enable_pin = !PF2
+microsteps = 16
+rotation_distance = 40
+endstop_pin = ^PJ1
+position_endstop = 0
+position_min = 0
+position_max = 305
+homing_speed = 50
+homing_retract_dist = 10.0
+homing_retract_speed = 8
+second_homing_speed = 8
+use_sensorless_homing = False
+high_precision_step_compress = False
+
+[stepper_z]
+step_pin = PL3
+dir_pin = !PL1
+enable_pin = !PK0
+microsteps = 16
+rotation_distance = 8
+position_min = -2
+position_max = 395
+homing_speed = 8
+homing_retract_dist = 10.0
+homing_retract_speed = 8
+second_homing_speed = 4
+use_sensorless_homing = False
+endstop_pin = ^PD3
+high_precision_step_compress = False
+position_endstop = 0.400
+
+[firmware_retraction]
+retract_length = 4.6
+retract_speed = 53
+unretract_extra_length = 0.00
+unretract_speed = 45
+z_hop_height = 0.6
+
+[gcode_macro _MAINTENANCE_CONFIG]
+variable_max_print_hours = 200
+gcode = 
+
+[gcode_macro _ALERT_CHECK]
+description = 
+gcode = 
+	{% set option = params.MODE|default(0)|int %}
+	{% set svv = printer.save_variables.variables %}
+	{% if option == 0 %}
+	{% if svv.maint_hr_counter == 0 %}
+	
+	{action_respond_info("MAINTENANCE TIMER HAS BEEN RESET TO %.2f HOURS."|format(svv.maint_hr_counter))}
+	{% else %}
+	
+	{action_respond_info("ERROR: UNABLE TO RESET MAINTENANCE TIMER.  Check your variables.cfg to make sure data is correct.")}
+	{% endif %}
+	{% elif option == 1 %}
+	{% if svv.maint_hr_counter > svv.maint_hr_max %}
+	
+	{action_respond_info("TIME FOR MAINTENANCE.  YOU HAVE %.2f PRINT HOURS."|format(svv.maint_hr_counter))}
+	{% endif %}
+	{% endif %}
+
+[gcode_macro MAINTENANCE_RESET]
+description = sets max hours and resets hour counter
+gcode = 
+	SAVE_VARIABLE VARIABLE=maint_hr_counter VALUE=0
+	SAVE_VARIABLE VARIABLE=maint_hr_max VALUE={printer["gcode_macro _MAINTENANCE_CONFIG"].max_print_hours}
+	_ALERT_CHECK
+
+[gcode_macro MAINTENANCE_TIME]
+description = displays current print hours since last maintenance
+gcode = 
+	{% set svv = printer.save_variables.variables %}
+	{action_respond_info("CURRENTLY HAVE %.2f HOURS SINCE LAST MAINTENANCE.  YOUR MAX HOURS IS: %.2f"|format(svv.maint_hr_counter, svv.maint_hr_max))}
+
+[gcode_macro _ADD_MAINTENANCE_TIMER]
+description = updates the hourcounter variable with the recently completed print.  call this in your print_end.
+gcode = 
+	{% set svv = printer.save_variables.variables %}
+	
+	{% set total_hours = ((printer.print_stats.total_duration/3600)|round(2,'common')) %}
+	
+	{% if total_hours > 0 %}
+	SAVE_VARIABLE VARIABLE=maint_hr_counter VALUE={svv.maint_hr_counter + total_hours}
+	
+	_ALERT_CHECK MODE=1
+	{% endif %}
+
+[safe_z_home]
+home_xy_position = 150,150
+speed = 120
+z_hop = 10
+z_hop_speed = 15
+move_to_previous = False
+
+[duplicate_pin_override]
+pins = PK5,
+
+[heater_bed]
+heater_pin = PH5
+sensor_type = EPCOS 100K B57560G104F
+sensor_pin = PK6
+control = pid
+pid_kp = 201.86
+pid_ki = 10.67
+pid_kd = 954.96
+min_temp = 0
+max_temp = 120
+
+[verify_heater heater_bed]
+max_error = 120
+check_gain_time = 90
+hysteresis = 5
+heating_gain = 2
+
+[z_thermal_adjust]
+temp_coeff = 0.0
+smooth_time = 2.0
+z_adjust_off_above = 99999999.0
+max_z_adjustment = 99999999.0
+sensor_type = EPCOS 100K B57560G104F
+sensor_pin = PK5
+min_temp = 0
+max_temp = 300
+
+[bed_screws]
+screw1 = 30,40
+screw1_name = front left screw
+screw2 = 270,40
+screw2_name = front right screw
+screw3 = 270,270
+screw3_name = rear right screw
+screw4 = 30,270
+screw4_name = rear left screw
+speed = 50
+horizontal_move_z = 7
+
+[gcode_macro BED_TRAMMING]
+gcode = 
+	M190 S72
+	M109 S220
+	_B28
+	G4 P2000
+	BED_SCREWS_ADJUST
+
+[gcode_macro PID_BED]
+gcode = 
+	PID_CALIBRATE HEATER=heater_bed TARGET=72
+
+[fan]
+pin = PH6
+
+[temperature_sensor rhino_linux]
+sensor_type = temperature_host
+min_temp = 10
+max_temp = 105
+
+[gcode_macro PART_COOLING_FAN_ON]
+gcode = 
+	M106 S255
+
+[gcode_macro PART_COOLING_FAN_OFF]
+gcode = 
+	M106 S0
+
+[gcode_macro _check_fan_params]
+gcode = 
+	{% set MAXIMUM = params.MAXIMUM|default(
+	printer["gcode_macro set_fan_scaling"].maximum)|int %}
+	{% set MINIMUM = params.MINIMUM|default(
+	printer["gcode_macro set_fan_scaling"].minimum)|int %}
+	
+	{% if params.SCALE and params.SCALE|float <= 0 %}
+	{ action_raise_error("SCALE must be a positive value.") }
+	{% elif MINIMUM < 0 or MINIMUM > 255 %}
+	{ action_raise_error("MINIMUM must be between 0 and 255.") }
+	{% elif MAXIMUM < 0 or MAXIMUM > 255 %}
+	{ action_raise_error("MAXIMUM must be between 0 and 255.") }
+	{% elif params.SPEED and (params.SPEED|int < 0 or params.SPEED|int > 255) %}
+	{ action_raise_error("SPEED must be between 0 and 255.") }
+	{% elif params.BOOST and (params.BOOST|int < 0 or params.BOOST|int > 255) %}
+	{ action_raise_error("BOOST must be between 0 and 255.") }
+	{% elif MINIMUM > MAXIMUM %}
+	{ action_raise_error("MINIMUM must be less than or equal to MAXIMUM.") }
+	{% endif %}
+
+[gcode_macro set_fan_scaling]
+description = Sets fan scaling factors applied to M106 command. If a speed is
+	provided it will be adjusted according to the scaling parameters.
+	Usage: SET_FAN_SCALING [SCALE=<scale>] [BOOST=<boost>] [MAXIMUM=<max>]
+	[MINIMUM=<min>] [SPEED=<speed>]
+variable_scale = 1.0
+variable_boost = 0
+variable_minimum = 0
+variable_maximum = 255
+variable_real_speed = 0
+gcode = 
+	_CHECK_FAN_PARAMS{% for k in params %}{' '~k~'='~params[k]}{% endfor %}
+	{% set SCALE = params.SCALE|default(scale)|float %}
+	{% set BOOST = params.BOOST|default(boost)|float %}
+	{% set MAXIMUM = params.MAXIMUM|default(maximum)|int %}
+	{% set MINIMUM = params.MINIMUM|default(minimum)|int %}
+	{% set SPEED = params.SPEED|default(real_speed)|int %}
+	
+	{% if SCALE != 1.0 or BOOST != 0 or MAXIMUM != 255 or MINIMUM != 0 %}
+	{action_respond_info("Fan: Scale: %.2f Minimum:%i Maximum: %i Speed: %i"|
+	format(SCALE, MINIMUM, MAXIMUM, SPEED))}
+	{% endif %}
+	
+	
+	{% if params|length > 0 %}
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=scale VALUE="{SCALE}"
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=boost VALUE="{BOOST}"
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=minimum VALUE="{MINIMUM}"
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=maximum VALUE="{MAXIMUM}"
+	
+	M106 S{SPEED}
+	{% endif %}
+	
+	{% set dummy = None if True else "
+	{% set dummy = params.SCALE|default(1.0)|float %}
+	{% set dummy = params.BUMP|default(0)|int %}
+	{% set dummy = params.MAXIMUM|default(255)|int %}
+	{% set dummy = params.MINIMUM|default(0)|int %}
+	{% set dummy = params.SPEED|default(current speed)|int %}
+	" %}
+
+[gcode_macro reset_fan_scaling]
+description = Clears all fan scaling factors.
+	Usage: RESET_FAN_SCALING
+gcode = 
+	SET_FAN_SCALING SCALE=1.0 BOOST=0 MAXIMUM=255 MINIMUM=0
+
+[gcode_macro m106]
+description = Wraps M106 to implement scaling overrides.
+rename_existing = M106.6245197
+gcode = 
+	{% set S = params.S|default(255)|int %}
+	{% set scale = printer["gcode_macro set_fan_scaling"] %}
+	SET_GCODE_VARIABLE MACRO=set_fan_scaling VARIABLE=real_speed VALUE="{S}"
+	M106.6245197 S{((((S + scale.boost) * scale.scale) | round | int,
+	scale.minimum) | max, scale.maximum) | min}
+
+[extruder]
+step_pin = PA4
+dir_pin = PA6
+enable_pin = !PA2
+microsteps = 128
+high_precision_step_compress = False
+rotation_distance = 60.92862336
+step_pulse_duration = 0.000002
+full_steps_per_rotation = 200
+heater_pin = PB4
+sensor_type = EPCOS 100K B57560G104F
+sensor_pin = PK5
+pressure_advance = 0.0495
+max_extrude_only_distance = 200.0
+nozzle_diameter = 0.400
+filament_diameter = 1.750
+heater_power = 40
+cooling_fan = fan
+control = mpc
+block_heat_capacity = 16.4775
+sensor_responsiveness = 0.0643333
+ambient_transfer = 0.0551994
+fan_ambient_transfer = 0.0551994, 0.0794723, 0.090845
+min_temp = 0
+max_temp = 300
+
+[input_shaper]
+shaper_freq_x = 39.8
+shaper_freq_y = 39.0
+shaper_type_x = ei
+shaper_type_y = 2hump_ei
+damping_ratio_x = 0.1
+damping_ratio_y = 0.1
+
+[gcode_macro TEST_SPEED]
+description = Test for max speed and acceleration parameters for the printer. Procedure: Home -> ReadPositionFromMCU -> MovesToolhead@Vel&Accel -> Home -> ReadPositionfromMCU
+gcode = 
+	
+	{% set speed  = params.SPEED|default(printer.configfile.settings.printer.max_velocity)|int %}
+	
+	{% set iterations = params.ITERATIONS|default(5)|int %}
+	
+	{% set accel  = params.ACCEL|default(printer.configfile.settings.printer.max_accel)|int %}
+	
+	{% set min_cruise_ratio = params.MIN_CRUISE_RATIO|default(0.5)|float %}
+	
+	{% set bound = params.BOUND|default(20)|int %}
+	
+	{% set smallpatternsize = SMALLPATTERNSIZE|default(20)|int %}
+	
+	
+	
+	{% set x_min = printer.toolhead.axis_minimum.x + bound %}
+	{% set x_max = printer.toolhead.axis_maximum.x - bound %}
+	{% set y_min = printer.toolhead.axis_minimum.y + bound %}
+	{% set y_max = printer.toolhead.axis_maximum.y - bound %}
+	
+	
+	
+	{% set x_center = (printer.toolhead.axis_minimum.x|float + printer.toolhead.axis_maximum.x|float ) / 2 %}
+	{% set y_center = (printer.toolhead.axis_minimum.y|float + printer.toolhead.axis_maximum.y|float ) / 2 %}
+	
+	
+	{% set x_center_min = x_center - (smallpatternsize/2) %}
+	{% set x_center_max = x_center + (smallpatternsize/2) %}
+	{% set y_center_min = y_center - (smallpatternsize/2) %}
+	{% set y_center_max = y_center + (smallpatternsize/2) %}
+	
+	
+	SAVE_GCODE_STATE NAME=TEST_SPEED
+	
+	
+	{ action_respond_info("TEST_SPEED: starting %d iterations at speed %d, accel %d" % (iterations, speed, accel)) }
+	
+	
+	M400
+	G28
+	
+	{% if printer.configfile.settings.quad_gantry_level %}
+	{% if printer.quad_gantry_level.applied == False %}
+	QUAD_GANTRY_LEVEL
+	G28 Z
+	{% endif %}
+	{% endif %}
+	
+	G90
+	G1 X{printer.toolhead.axis_maximum.x-50} Y{printer.toolhead.axis_maximum.y-50} F{30*60}
+	M400
+	G28 X Y
+	G0 X{printer.toolhead.axis_maximum.x-1} Y{printer.toolhead.axis_maximum.y-1} F{30*60}
+	G4 P1000
+	GET_POSITION
+	
+	
+	G0 X{x_min} Y{y_min} Z{bound + 10} F{speed*60}
+	
+	
+	{% if printer.configfile.settings.printer.minimum_cruise_ratio is defined %}
+	SET_VELOCITY_LIMIT VELOCITY={speed} ACCEL={accel} MINIMUM_CRUISE_RATIO={min_cruise_ratio}
+	{% else %}
+	SET_VELOCITY_LIMIT VELOCITY={speed} ACCEL={accel} ACCEL_TO_DECEL={accel / 2}
+	{% endif %}
+	
+	{% for i in range(iterations) %}
+	
+	G0 X{x_min} Y{y_min} F{speed*60}
+	G0 X{x_max} Y{y_max} F{speed*60}
+	G0 X{x_min} Y{y_min} F{speed*60}
+	G0 X{x_max} Y{y_min} F{speed*60}
+	G0 X{x_min} Y{y_max} F{speed*60}
+	G0 X{x_max} Y{y_min} F{speed*60}
+	
+	
+	G0 X{x_min} Y{y_min} F{speed*60}
+	G0 X{x_min} Y{y_max} F{speed*60}
+	G0 X{x_max} Y{y_max} F{speed*60}
+	G0 X{x_max} Y{y_min} F{speed*60}
+	
+	
+	G0 X{x_center_min} Y{y_center_min} F{speed*60}
+	G0 X{x_center_max} Y{y_center_max} F{speed*60}
+	G0 X{x_center_min} Y{y_center_min} F{speed*60}
+	G0 X{x_center_max} Y{y_center_min} F{speed*60}
+	G0 X{x_center_min} Y{y_center_max} F{speed*60}
+	G0 X{x_center_max} Y{y_center_min} F{speed*60}
+	
+	
+	G0 X{x_center_min} Y{y_center_min} F{speed*60}
+	G0 X{x_center_min} Y{y_center_max} F{speed*60}
+	G0 X{x_center_max} Y{y_center_max} F{speed*60}
+	G0 X{x_center_max} Y{y_center_min} F{speed*60}
+	{% endfor %}
+	
+	
+	{% if printer.configfile.settings.printer.minimum_cruise_ratio is defined %}
+	SET_VELOCITY_LIMIT VELOCITY={printer.configfile.settings.printer.max_velocity} ACCEL={printer.configfile.settings.printer.max_accel} MINIMUM_CRUISE_RATIO={printer.configfile.settings.printer.minimum_cruise_ratio}
+	{% else %}
+	SET_VELOCITY_LIMIT VELOCITY={printer.configfile.settings.printer.max_velocity} ACCEL={printer.configfile.settings.printer.max_accel} ACCEL_TO_DECEL={printer.configfile.settings.printer.max_accel_to_decel}
+	{% endif %}
+	
+	
+	M400
+	G28
+	
+	G90
+	G0 X{printer.toolhead.axis_maximum.x-1} Y{printer.toolhead.axis_maximum.y-1} F{30*60}
+	G4 P1000
+	GET_POSITION
+	
+	
+	RESTORE_GCODE_STATE NAME=TEST_SPEED
+
+[mcu]
+serial = /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+baud = 250000
+
+[printer]
+kinematics = cartesian
+max_velocity = 238
+max_accel = 11500
+max_z_velocity = 17
+max_z_accel = 700
+square_corner_velocity = 10.0
+minimum_cruise_ratio = 0.5
+
+[save_variables]
+filename = ~/ben10_data/config/variables.cfg
+
+[endstop_phase]
+
+[force_move]
+enable_force_move = True
+
+[exclude_object]
+enable_exclude_object = True
+
+[gcode_arcs]
+resolution = 0.1
+
+[danger_options]
+error_on_unused_config_options = True
+allow_plugin_override = True
+multi_mcu_trsync_timeout = 0.025
+homing_elapsed_distance_tolerance = 0.5
+autosave_includes = True
+bgflush_extra_time = 0.250
+log_statistics = True
+log_config_file_at_startup = True
+log_bed_mesh_at_startup = True
+log_shutdown_info = True
+log_serial_reader_warnings = True
+log_startup_info = True
+log_webhook_method_register_messages = False
+=======================
+Extruder max_extrude_ratio=0.266081
+mcu 'mcu': Starting serial connect
+webhooks client 133587013900272: New connection
+webhooks client 133587013900272: Client info {'program': 'Moonraker', 'version': 'v0.9.3-74-g1c12414'}
+mcu 'mcu':  got {'oid': 13, 'next_clock': 2611688704, 'value': 7846, '#name': 'analog_in_state', '#sent_time': 136998.123248568, '#receive_time': 136998.13538924503}
+mcu 'mcu':  got {'oid': 18, 'next_clock': 2612488704, 'value': 7847, '#name': 'analog_in_state', '#sent_time': 136998.177570244, '#receive_time': 136998.185475278}
+mcu 'mcu':  got {'oid': 11, 'next_clock': 2616168704, 'value': 7848, '#name': 'analog_in_state', '#sent_time': 136998.394933339, '#receive_time': 136998.41525005302}
+mcu 'mcu':  got {'oid': 13, 'next_clock': 2616488704, 'value': 7846, '#name': 'analog_in_state', '#sent_time': 136998.394933339, '#receive_time': 136998.435500958}
+mcu 'mcu':  got {'oid': 18, 'next_clock': 2617288704, 'value': 7848, '#name': 'analog_in_state', '#sent_time': 136998.448751204, '#receive_time': 136998.48543466502}
+Loaded MCU 'mcu' 119 commands (Kalico v0.12.0-675-ga2f3b10c / gcc: (GCC) 14.2.0 binutils: (GNU Binutils) 2.43.1)
+MCU 'mcu' config: ADC_MAX=1023 BUS_PINS_spi=PB3,PB2,PB1 BUS_PINS_twi=PD0,PD1 CLOCK_FREQ=16000000 MCU=atmega2560 PWM_MAX=255 RECEIVE_WINDOW=192 RESERVE_PINS_serial=PE0,PE1 SERIAL_BAUD=250000 STATS_SUMSQ_BASE=256
+Configured MCU 'mcu' (278 moves)
+Starting heater checks for heater_bed
+Starting heater checks for extruder
+Welcome to Kalico
+
+Kalico is starting an opt-in analytics campaign, collecting anonymous data about our users
+Submitted data will contain an anonymized copy of your current configuration, enabled Kalico modules and plugins, and some basic information about the host machine.
+
+`ENABLE_TELEMETRY` will opt-in to the campaign
+`DISABLE_TELEMETRY` will permanently opt-out
+
+`TELEMETRY_EXAMPLE` will save a full example of what would be submitted as 'telemetry.json' in your configuration folder
+
+For more information, visit https://kalico.gg/telemetry
